@@ -8,6 +8,7 @@ app.use(cors());
 
 const ytmusic = new YTMusic();
 
+
 (async () => {
   await ytmusic.initialize();
   console.log("YT Music API lista 🎶");
