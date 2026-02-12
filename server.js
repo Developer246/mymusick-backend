@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { YTMusic } = require("ytmusic-api");
+const YTMusic = require("ytmusic-api");
 
 const app = express();
 app.use(cors());
@@ -8,8 +8,12 @@ app.use(cors());
 const ytmusic = new YTMusic();
 
 (async () => {
-  await ytmusic.initialize();
-  console.log("YT Music inicializado");
+  try {
+    await ytmusic.initialize();
+    console.log("YT Music listo");
+  } catch (e) {
+    console.error("Error inicializando YTMusic", e);
+  }
 })();
 
 app.get("/search", async (req, res) => {
@@ -28,4 +32,5 @@ app.get("/search", async (req, res) => {
 app.listen(process.env.PORT || 3000, () => {
   console.log("Servidor activo");
 });
+
 
