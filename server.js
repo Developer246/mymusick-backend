@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
-const YTMusic = require("ytmusic-api").default;
+const YTMusicLib = require("ytmusic-api");
+const YTMusic = YTMusicLib.default || YTMusicLib;
 
 const app = express();
 app.use(cors());
@@ -11,11 +12,13 @@ const ytmusic = new YTMusic();
   await ytmusic.initialize({
     clientName: "WEB_REMIX",
     clientVersion: "1.20240101.01.00",
-    cookies: "" 
+    cookies: String("") 
   });
 
   console.log("YT Music listo 🎶");
-})();
+})().catch(err => {
+  console.error("Error al iniciar YTMusic:", err);
+});
 
 app.get("/search", async (req, res) => {
   try {
@@ -35,4 +38,5 @@ app.get("/search", async (req, res) => {
 app.listen(3000, () => {
   console.log("Servidor corriendo 🚀");
 });
+
 
