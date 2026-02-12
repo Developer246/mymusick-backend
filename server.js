@@ -35,3 +35,4 @@ app.get("/search", async (req, res) => {
 app.listen(3000, () => {
   console.log("Servidor corriendo 🚀");
 });
+
