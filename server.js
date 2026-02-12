@@ -6,38 +6,33 @@ const app = express();
 app.use(cors());
 
 const ytmusic = new YTMusic();
-let ytmusicReady = false;
 
 (async () => {
   try {
-    await ytmusic.initialize();
-    ytmusicReady = true;
-    console.log("YT Music inicializado 🎶");
-  } catch (err) {
-    console.error("Error inicializando YT Music", err);
+    await ytmusic.initialize({
+      clientName: "WEB_REMIX",
+      clientVersion: "1.20240101.01.00"
+    });
+    console.log("YTMusic listo 🎶");
+  } catch (e) {
+    console.error("ERROR YT MUSIC:", e);
   }
 })();
 
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q;
-    if (!q) {
-      return res.status(400).json({ error: "Falta parámetro q" });
-    }
+    if (!q) return res.status(400).json([]);
 
     const results = await ytmusic.search(q);
+    const songs = results.filter(r => r.type === "song");
 
-    res.json(results);
+    res.json(songs);
   } catch (err) {
-    console.error("ERROR YT MUSIC:", err);
-    res.status(500).json({ error: "Error interno en búsqueda" });
+    console.error("SEARCH ERROR:", err);
+    res.status(500).json([]);
   }
 });
 
-
-app.listen(3000, () => {
-  console.log("Servidor corriendo en puerto 3000 🚀");
-});
-
-
-
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Servidor corriendo en", PORT));
