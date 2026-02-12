@@ -15,27 +15,20 @@ const ytmusic = new YTMusic();
 
 app.get("/search", async (req, res) => {
   try {
-    const query = req.query.q;       
-
-    if (!query) {                    
-      return res.json([]);
+    const q = req.query.q;
+    if (!q) {
+      return res.status(400).json({ error: "Falta parámetro q" });
     }
 
-    const results = await ytmusic.search(query, "song"); 
+    const results = await ytmusic.search(q);
 
-    const songs = results.map(song => ({
-      title: song.name,              
-      artist: song.artist.name,      
-      videoId: song.videoId,         
-      thumbnail: song.thumbnails[0]?.url 
-    }));
-
-    res.json(songs);                 
+    res.json(results);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error buscando música" });
+    console.error("ERROR YT MUSIC:", err);
+    res.status(500).json({ error: "Error interno en búsqueda" });
   }
 });
+
 
 app.listen(3000, () => {
   console.log("Servidor corriendo en puerto 3000 🚀");
