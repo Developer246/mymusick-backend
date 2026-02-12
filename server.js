@@ -1,13 +1,11 @@
 const express = require("express");
 const cors = require("cors");
-const { YTMusic } = require("ytmusic-api");
-
+const YTMusic = require("ytmusic-api").default;
 
 const app = express();
 app.use(cors());
 
 const ytmusic = new YTMusic();
-
 
 (async () => {
   await ytmusic.initialize();
