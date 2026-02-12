@@ -9,16 +9,14 @@ app.use(cors());
 const ytmusic = new YTMusic();
 
 (async () => {
-  await ytmusic.initialize({
-    clientName: "WEB_REMIX",
-    clientVersion: "1.20240101.01.00",
-    cookies: String("") 
-  });
+  try {
+    await ytmusic.initialize(); // 🔥 SIN opciones
 
-  console.log("YT Music listo 🎶");
-})().catch(err => {
-  console.error("Error al iniciar YTMusic:", err);
-});
+    console.log("YT Music listo 🎶");
+  } catch (err) {
+    console.error("Error al iniciar YTMusic:", err);
+  }
+})();
 
 app.get("/search", async (req, res) => {
   try {
@@ -35,8 +33,11 @@ app.get("/search", async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log("Servidor corriendo 🚀");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Servidor corriendo 🚀 en puerto", PORT);
 });
+
 
 
