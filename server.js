@@ -6,12 +6,17 @@ const app = express();
 app.use(cors());
 
 const ytmusic = new YTMusic();
+let ytmusicReady = false;
 
 (async () => {
-  await ytmusic.initialize();
-  console.log("YT Music listo 🎵");
+  try {
+    await ytmusic.initialize();
+    ytmusicReady = true;
+    console.log("YT Music inicializado 🎶");
+  } catch (err) {
+    console.error("Error inicializando YT Music", err);
+  }
 })();
-
 
 app.get("/search", async (req, res) => {
   try {
