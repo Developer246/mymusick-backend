@@ -24,12 +24,18 @@ app.get("/search", async (req, res) => {
     const q = req.query.q;
     if (!q) return res.json([]);
 
-
     const search = await yt.music.search(q, {
       type: "song"
     });
 
-    const songs = search.contents.map(item => ({
+    // 🔥 buscar la sección correcta
+    const songsSection = search.contents.find(
+      section => section.title === "Songs"
+    );
+
+    if (!songsSection) return res.json([]);
+
+    const songs = songsSection.contents.map(item => ({
       title: item.title?.text,
       artist: item.artists?.map(a => a.name).join(", "),
       album: item.album?.name,
@@ -44,6 +50,7 @@ app.get("/search", async (req, res) => {
     res.status(500).json([]);
   }
 });
+
 
 const PORT = process.env.PORT || 3000;
 
