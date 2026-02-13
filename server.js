@@ -1,20 +1,21 @@
 const express = require("express");
 const cors = require("cors");
-const YTMusicLib = require("ytmusic-api");
-const YTMusic = YTMusicLib.default || YTMusicLib;
+const { Innertube } = require("youtubei.js");
 
 const app = express();
 app.use(cors());
 
-const ytmusic = new YTMusic();
+let yt;
 
 (async () => {
   try {
-    await ytmusic.initialize(); // 🔥 SIN opciones
+    yt = await Innertube.create({
+      client_type: "WEB"
+    });
 
-    console.log("YT Music listo 🎶");
+    console.log("YouTube listo 🎶");
   } catch (err) {
-    console.error("Error al iniciar YTMusic:", err);
+    console.error("Error iniciando YouTube:", err);
   }
 })();
 
@@ -23,12 +24,20 @@ app.get("/search", async (req, res) => {
     const q = req.query.q;
     if (!q) return res.json([]);
 
-    const results = await ytmusic.search(q);
-    const songs = results.filter(r => r.type === "song");
+    const results = await yt.search(q);
+
+    const songs = results.results
+      .filter(item => item.type === "Video")
+      .map(item => ({
+        title: item.title?.text,
+        artist: item.author?.name,
+        thumbnail: item.thumbnails?.[0]?.url,
+        id: item.id
+      }));
 
     res.json(songs);
   } catch (err) {
-    console.error("ERROR YT MÚSICA:", err);
+    console.error("ERROR YT:", err);
     res.status(500).json([]);
   }
 });
@@ -38,6 +47,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Servidor corriendo 🚀 en puerto", PORT);
 });
-
-
-
