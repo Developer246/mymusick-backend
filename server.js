@@ -10,9 +10,8 @@ let yt;
 (async () => {
   try {
     yt = await Innertube.create({
-      client_type: "WEB_REMIX" 
+      client_type: "WEB_REMIX"
     });
-
     console.log("YouTube Music listo 🎵");
   } catch (err) {
     console.error("Error iniciando YouTube Music:", err);
@@ -22,26 +21,31 @@ let yt;
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q;
-    if (!q) return res.json([]);
+    if (!q || !yt) {
+      return res.json([]);
+    }
 
-    const search = await yt.music.search(q, {
-      type: "song"
-    });
+    const search = await yt.music.search(q, { type: "song" });
 
-    // 🔥 buscar la sección correcta
     const songsSection = search.contents.find(
-      section => section.title === "Songs"
+      section =>
+        section?.contents &&
+        section.contents.some(item => item?.id && item?.title)
     );
 
-    if (!songsSection) return res.json([]);
+    if (!songsSection) {
+      return res.json([]);
+    }
 
-    const songs = songsSection.contents.map(item => ({
-      title: item.title?.text,
-      artist: item.artists?.map(a => a.name).join(", "),
-      album: item.album?.name,
-      thumbnail: item.thumbnails?.[0]?.url,
-      id: item.id
-    }));
+    const songs = songsSection.contents
+      .filter(item => item?.id && item?.title)
+      .map(item => ({
+        title: item.title.text,
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: item.album?.name || null,
+        thumbnail: item.thumbnails?.slice(-1)[0]?.url || null,
+        id: item.id
+      }));
 
     res.json(songs);
 
@@ -51,9 +55,7 @@ app.get("/search", async (req, res) => {
   }
 });
 
-
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
   console.log("Servidor corriendo 🚀 en puerto", PORT);
 });
