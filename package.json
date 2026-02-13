@@ -11,4 +11,7 @@
     "cors": "^2.8.5",
     "ytmusic-api": "^4.2.0"
   }
+  "engines": {
+  "node": "18.x"
+}
 }
