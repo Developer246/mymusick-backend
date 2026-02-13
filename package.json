@@ -1,17 +1,11 @@
 {
-  "name": "my-musick-backend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
-    "ytmusic-api": "^5.2.2"
-  }, 
+    "youtubei.js": "^10.0.0"
+  },
   "engines": {
     "node": "18.x"
   }
 }
+
