@@ -10,12 +10,12 @@ let yt;
 (async () => {
   try {
     yt = await Innertube.create({
-      client_type: "WEB"
+      client_type: "WEB_REMIX" 
     });
 
-    console.log("YouTube listo 🎶");
+    console.log("YouTube Music listo 🎵");
   } catch (err) {
-    console.error("Error iniciando YouTube:", err);
+    console.error("Error iniciando YouTube Music:", err);
   }
 })();
 
@@ -24,20 +24,23 @@ app.get("/search", async (req, res) => {
     const q = req.query.q;
     if (!q) return res.json([]);
 
-    const results = await yt.search(q);
 
-    const songs = results.results
-      .filter(item => item.type === "Video")
-      .map(item => ({
-        title: item.title?.text,
-        artist: item.author?.name,
-        thumbnail: item.thumbnails?.[0]?.url,
-        id: item.id
-      }));
+    const search = await yt.music.search(q, {
+      type: "song"
+    });
+
+    const songs = search.contents.map(item => ({
+      title: item.title?.text,
+      artist: item.artists?.map(a => a.name).join(", "),
+      album: item.album?.name,
+      thumbnail: item.thumbnails?.[0]?.url,
+      id: item.id
+    }));
 
     res.json(songs);
+
   } catch (err) {
-    console.error("ERROR YT:", err);
+    console.error("ERROR YT MUSIC:", err);
     res.status(500).json([]);
   }
 });
@@ -47,3 +50,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Servidor corriendo 🚀 en puerto", PORT);
 });
+
