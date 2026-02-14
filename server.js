@@ -7,7 +7,6 @@ app.use(cors());
 
 let yt;
 
-// Inicializar YouTube Music
 async function initYouTube() {
   yt = await Innertube.create({ client_type: "WEB_REMIX" });
   console.log("🎵 YouTube Music listo");
@@ -46,5 +45,6 @@ app.listen(3000, async () => {
   await initYouTube();
   console.log("🚀 Servidor corriendo en puerto 3000");
 });
+
 
 
