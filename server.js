@@ -38,16 +38,27 @@ app.get("/search", async (req, res) => {
   }
 });
 
-app.get("/audio/:id", (req, res) => {
-  const url = `https://www.youtube.com/watch?v=${req.params.id}`;
-  res.setHeader("Content-Type", "audio/mpeg");
+app.get("/audio/:id", async (req, res) => {
+  const id = req.params.id;
 
-  ytdl(url, {
-    filter: "audioonly",
-    quality: "highestaudio",
-    highWaterMark: 1 << 25
-  }).pipe(res);
+  if (!/^[a-zA-Z0-9-_]{11}$/.test(id)) {
+    console.error("❌ ID inválido:", id);
+    return res.status(400).json({ error: "ID de video inválido" });
+  }
+
+  const url = `https://www.youtube.com/watch?v=${id}`;
+
+  try {
+    res.setHeader("Content-Type", "audio/mpeg");
+
+    ytdl(url, {
+      filter: "audioonly",
+      quality: "highestaudio",
+      highWaterMark: 1 << 25
+    }).pipe(res);
+
+  } catch (err) {
+    console.error("🔥 Error audio:", err);
+    res.sendStatus(500);
+  }
 });
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("🚀 Backend activo en", PORT));
