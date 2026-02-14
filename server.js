@@ -21,17 +21,8 @@ app.get("/search", async (req, res) => {
     const search = await yt.music.search(q, { type: "song" });
     const section = search.contents.find(s => s?.contents);
 
-    const songs = section.contents
-      .filter(i => i?.id && i?.title)
-      .slice(0, 10)
-      .map(i => ({
-        title: i.title.text,
-        artist: i.artists?.map(a => a.name).join(", "),
-        thumbnail: i.thumbnails?.slice(-1)[0]?.url,
-        id: i.id
-      }));
+    res.json(section ? section.contents : []);
 
-    res.json(songs);
   } catch (e) {
     console.error(e);
     res.json([]);
