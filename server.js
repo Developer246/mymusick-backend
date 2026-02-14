@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const ytdl = require("ytdl-core");
 const { Innertube } = require("youtubei.js");
 
 const app = express();
@@ -19,7 +18,7 @@ app.get("/search", async (req, res) => {
     if (!q || !yt) return res.json([]);
 
     const search = await yt.music.search(q, { type: "song" });
-    res.json(search); // devuelve todo el resultado crudo
+    res.json(search);
 
   } catch (e) {
     console.error(e);
