@@ -19,12 +19,11 @@ app.get("/search", async (req, res) => {
     if (!q || !yt) return res.json([]);
 
     const search = await yt.music.search(q, { type: "song" });
-    const section = search.contents.find(s => s?.contents);
-
-    res.json(section ? section.contents : []);
+    res.json(search); // devuelve todo el resultado crudo
 
   } catch (e) {
     console.error(e);
     res.json([]);
   }
 });
+
