@@ -25,21 +25,17 @@ app.get("/search", async (req, res) => {
 
     const result = await yt.music.search(q, { type: "song" });
 
-    const canciones = result.contents.map(song => ({
-      id: song.id,
-      titulo: song.title?.text,
-      artista: song.artists?.map(a => a.name).join(", "),
-      duracion: song.duration?.text,
-      thumbnail: song.thumbnails?.[0]?.url
-    }));
+    const section = result.contents?.find(c => c.type === "musicShelfRenderer");
+    const items = section?.contents || [];
 
-    res.json(canciones);
+const canciones = items.map(song => ({
+  id: song.videoId || song.playlistId,
+  titulo: song.title?.runs?.[0]?.text,
+  artista: song.longBylineText?.runs?.map(r => r.text).join(", "),
+  duracion: song.thumbnailOverlays?.[0]?.text?.simpleText,
+  thumbnail: song.thumbnail?.thumbnails?.[0]?.url
+}));
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Error en la búsqueda" });
-  }
-});
 
 app.listen(3000, async () => {
   await initYouTube();
