@@ -37,28 +37,3 @@ app.get("/search", async (req, res) => {
     res.json([]);
   }
 });
-
-app.get("/audio/:id", async (req, res) => {
-  const id = req.params.id;
-
-  if (!/^[a-zA-Z0-9-_]{11}$/.test(id)) {
-    console.error("❌ ID inválido:", id);
-    return res.status(400).json({ error: "ID de video inválido" });
-  }
-
-  const url = `https://www.youtube.com/watch?v=${id}`;
-
-  try {
-    res.setHeader("Content-Type", "audio/mpeg");
-
-    ytdl(url, {
-      filter: "audioonly",
-      quality: "highestaudio",
-      highWaterMark: 1 << 25
-    }).pipe(res);
-
-  } catch (err) {
-    console.error("🔥 Error audio:", err);
-    res.sendStatus(500);
-  }
-});
