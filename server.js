@@ -8,7 +8,7 @@ app.use(cors());
 let yt;
 
 async function initYouTube() {
-  yt = await Innertube.create({ client_type: "WEB_REMIX" });
+  yt = await Innertube.create({ client_type: "ANDROID" });
   console.log("🎵 YouTube Music listo");
 }
 
