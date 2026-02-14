@@ -23,44 +23,59 @@ let yt;
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q || !yt) {
-      return res.json([]);
-    }
+    if (!q || !yt) return res.json([]);
 
     const search = await yt.music.search(q, { type: "song" });
 
-    // Buscar una sección que realmente tenga canciones
     const songsSection = search.contents.find(
-      section =>
-        Array.isArray(section?.contents) &&
-        section.contents.some(item => item?.id && item?.title)
+      s => Array.isArray(s?.contents)
     );
 
-    if (!songsSection) {
-      return res.json([]);
-    }
+    if (!songsSection) return res.json([]);
 
     const songs = songsSection.contents
-      .filter(item => item?.id && item?.title)
+      .filter(item => item?.id)
       .slice(0, 10)
       .map(item => ({
-        title:
-          item.title?.text ||
-          item.title?.runs?.map(r => r.text).join("") ||
-          "Sin título",
-        artist:
-          item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        title: item.title?.text || "Sin título",
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
         album: item.album?.name || null,
         thumbnail: item.thumbnails?.slice(-1)[0]?.url || null,
         id: item.id
       }));
 
-    console.log(`🔎 "${q}" → ${songs.length} resultados`);
     res.json(songs);
 
   } catch (err) {
-    console.error("🔥 ERROR YT MUSIC:", err);
+    console.error("🔥 ERROR SEARCH:", err);
     res.status(500).json([]);
+  }
+});
+
+/* ───── Ruta de audio (CLAVE) ───── */
+app.get("/audio/:id", async (req, res) => {
+  try {
+    if (!yt) {
+      return res.status(503).send("YouTube no listo");
+    }
+
+    const videoId = req.params.id;
+
+    const info = await yt.getInfo(videoId);
+
+    const stream = await info.download({
+      type: "audio",
+      quality: "best"
+    });
+
+    res.setHeader("Content-Type", "audio/webm");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    stream.pipe(res);
+
+  } catch (err) {
+    console.error("🔥 ERROR AUDIO:", err);
+    res.status(500).send("Error reproduciendo audio");
   }
 });
 
@@ -69,7 +84,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
-
-
-
-
