@@ -7,54 +7,66 @@ app.use(cors());
 
 let yt;
 
-// Inicializa YouTube Music
-async function initYouTube() {
-  yt = await Innertube.create({ client_type: "ANDROID" });
-  console.log("🎵 YouTube Music listo");
-}
+/* ───── Inicializar YouTube Music ───── */
+(async () => {
+  try {
+    yt = await Innertube.create({
+      client_type: "WEB_REMIX"
+    });
+    console.log("🎵 YouTube Music listo");
+  } catch (err) {
+    console.error("❌ Error iniciando YouTube Music:", err);
+  }
+})();
 
-// Endpoint de búsqueda
+/* ───── Ruta de búsqueda ───── */
 app.get("/search", async (req, res) => {
   try {
-    if (!yt) {
-      return res.status(503).json({ error: "YouTube aún no está listo" });
+    const q = req.query.q?.trim();
+    if (!q || !yt) {
+      return res.json([]);
     }
 
-    const q = req.query.q?.toString().trim();
-    if (!q) {
-      return res.status(400).json({ error: "Falta el parámetro ?q=" });
+    const search = await yt.music.search(q, { type: "song" });
+
+    // Buscar una sección que realmente tenga canciones
+    const songsSection = search.contents.find(
+      section =>
+        Array.isArray(section?.contents) &&
+        section.contents.some(item => item?.id && item?.title)
+    );
+
+    if (!songsSection) {
+      return res.json([]);
     }
 
-    const result = await yt.music.search(q, { type: "song" });
+    const songs = songsSection.contents
+      .filter(item => item?.id && item?.title)
+      .slice(0, 10)
+      .map(item => ({
+        title:
+          item.title?.text ||
+          item.title?.runs?.map(r => r.text).join("") ||
+          "Sin título",
+        artist:
+          item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: item.album?.name || null,
+        thumbnail: item.thumbnails?.slice(-1)[0]?.url || null,
+        id: item.id
+      }));
 
-    // Buscar la sección de canciones correcta
-    const section = result.contents?.find(c => c.type === "musicShelfRenderer");
-    const items = section?.contents || [];
+    console.log(`🔎 "${q}" → ${songs.length} resultados`);
+    res.json(songs);
 
-    const canciones = items.map(song => ({
-      id: song.videoId || song.playlistId || "desconocido",
-      titulo: song.title?.runs?.[0]?.text || "Desconocido",
-      artista: song.longBylineText?.runs?.map(a => a.text).join(", ") || "Desconocido",
-      duracion: song.thumbnailOverlays?.[0]?.text?.simpleText || "0:00",
-      thumbnail: song.thumbnail?.thumbnails?.[0]?.url || null
-    }));
-
-    if (!canciones.length) {
-      return res.status(404).json({ error: "No se encontraron canciones para esa búsqueda" });
-    }
-
-    res.json(canciones);
-
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Error en la búsqueda" });
+  } catch (err) {
+    console.error("🔥 ERROR YT MUSIC:", err);
+    res.status(500).json([]);
   }
 });
 
-// Puerto configurable para Render o local
+/* ───── Servidor ───── */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, async () => {
-  await initYouTube();
+app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
 
