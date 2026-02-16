@@ -45,24 +45,18 @@ app.get("/search", async (req, res) => {
       }));
 
     res.json(songs);
-
   } catch (err) {
     console.error("🔥 ERROR SEARCH:", err);
     res.status(500).json([]);
   }
 });
 
-/* ───── Ruta de audio (CLAVE) ───── */
+/* ───── Ruta de audio (streaming) ───── */
 app.get("/audio/:id", async (req, res) => {
   try {
-    if (!yt) {
-      return res.status(503).send("YouTube no listo");
-    }
+    if (!yt) return res.status(503).send("YouTube no listo");
 
-    const videoId = req.params.id;
-
-    const info = await yt.getInfo(videoId);
-
+    const info = await yt.getInfo(req.params.id);
     const stream = await info.download({
       type: "audio",
       quality: "best"
@@ -72,10 +66,38 @@ app.get("/audio/:id", async (req, res) => {
     res.setHeader("Accept-Ranges", "bytes");
 
     stream.pipe(res);
-
   } catch (err) {
     console.error("🔥 ERROR AUDIO:", err);
     res.status(500).send("Error reproduciendo audio");
+  }
+});
+
+/* ───── Ruta de descarga (NUEVA) ───── */
+app.get("/download/:id", async (req, res) => {
+  try {
+    if (!yt) return res.status(503).send("YouTube no listo");
+
+    const videoId = req.params.id;
+    const info = await yt.getInfo(videoId);
+
+    const title =
+      info.basic_info?.title?.replace(/[^\w\s-]/g, "") || "audio";
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${title}.webm"`
+    );
+    res.setHeader("Content-Type", "audio/webm");
+
+    const stream = await info.download({
+      type: "audio",
+      quality: "best"
+    });
+
+    stream.pipe(res);
+  } catch (err) {
+    console.error("🔥 ERROR DOWNLOAD:", err);
+    res.status(500).send("Error descargando audio");
   }
 });
 
@@ -84,3 +106,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
+
