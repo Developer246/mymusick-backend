@@ -22,32 +22,16 @@ app.get("/search", async (req, res) => {
     const section = search.contents.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
-    const baseSongs = section.contents
+    const songs = section.contents
       .filter(item => item?.id)
-      .slice(0, 10);
-
-    const songs = await Promise.all(
-      baseSongs.map(async item => {
-        try {
-          const info = await yt.getInfo(item.id);
-          return {
-            id: item.id,
-            title: info.basic_info?.title || "Sin título",
-            artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-            album: item.album?.name || null,
-            thumbnail: item.thumbnails?.at(-1)?.url || null
-          };
-        } catch {
-          return {
-            id: item.id,
-            title: "Sin título",
-            artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-            album: item.album?.name || null,
-            thumbnail: item.thumbnails?.at(-1)?.url || null
-          };
-        }
-      })
-    );
+      .slice(0, 10)
+      .map(item => ({
+        id: item.id,
+        title: item.name?.text || "Sin título",
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: item.album?.name || null,
+        thumbnail: item.thumbnails?.at(-1)?.url || null
+      }));
 
     res.json(songs);
   } catch {
@@ -95,3 +79,4 @@ app.get("/download/:id", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT);
+
