@@ -8,103 +8,90 @@ app.use(cors());
 let yt;
 
 (async () => {
-  try {
-    yt = await Innertube.create({
-      client_type: "WEB_REMIX"
-    });
-    console.log("🎵 YouTube Music inicializado");
-  } catch (err) {
-    console.error("❌ Error iniciando YouTube Music:", err);
-  }
+  yt = await Innertube.create({ client_type: "WEB_REMIX" });
 })();
 
 app.get("/search", async (req, res) => {
   try {
-    if (!yt) return res.status(503).json([]);
+    if (!yt) return res.json([]);
 
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
     const search = await yt.music.search(q, { type: "song" });
-
-    const section = search.contents.find(
-      s => Array.isArray(s?.contents)
-    );
-
+    const section = search.contents.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
-    const songs = section.contents
+    const baseSongs = section.contents
       .filter(item => item?.id)
-      .slice(0, 10)
-      .map(item => ({
-        id: item.id,
-        title: item.name?.text || item.title?.text || "Sin título",
-        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: item.album?.name || null,
-        thumbnail: item.thumbnails?.at(-1)?.url || null
-      }));
+      .slice(0, 10);
+
+    const songs = await Promise.all(
+      baseSongs.map(async item => {
+        try {
+          const info = await yt.getInfo(item.id);
+          return {
+            id: item.id,
+            title: info.basic_info?.title || "Sin título",
+            artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+            album: item.album?.name || null,
+            thumbnail: item.thumbnails?.at(-1)?.url || null
+          };
+        } catch {
+          return {
+            id: item.id,
+            title: "Sin título",
+            artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+            album: item.album?.name || null,
+            thumbnail: item.thumbnails?.at(-1)?.url || null
+          };
+        }
+      })
+    );
 
     res.json(songs);
-  } catch (err) {
-    console.error("🔥 ERROR SEARCH:", err);
+  } catch {
     res.status(500).json([]);
   }
 });
 
 app.get("/audio/:id", async (req, res) => {
   try {
-    if (!yt) return res.status(503).send("YouTube no listo");
+    if (!yt) return res.sendStatus(503);
 
-    const videoId = req.params.id;
-    if (!videoId) return res.status(400).send("ID inválido");
-
-    const info = await yt.getInfo(videoId);
-    const stream = await info.download({
-      type: "audio",
-      quality: "best"
-    });
+    const info = await yt.getInfo(req.params.id);
+    const stream = await info.download({ type: "audio", quality: "best" });
 
     res.setHeader("Content-Type", "audio/webm");
     res.setHeader("Accept-Ranges", "bytes");
 
     stream.pipe(res);
-  } catch (err) {
-    console.error("🔥 ERROR AUDIO:", err);
-    res.status(500).send("Error reproduciendo audio");
+  } catch {
+    res.sendStatus(500);
   }
 });
 
 app.get("/download/:id", async (req, res) => {
   try {
-    if (!yt) return res.status(503).send("YouTube no listo");
+    if (!yt) return res.sendStatus(503);
 
-    const videoId = req.params.id;
-    if (!videoId) return res.status(400).send("ID inválido");
-
-    const info = await yt.getInfo(videoId);
-    const rawTitle = info.basic_info?.title || "audio";
-    const safeTitle = rawTitle.replace(/[^\w\s-]/g, "").trim();
+    const info = await yt.getInfo(req.params.id);
+    const title = (info.basic_info?.title || "audio")
+      .replace(/[^\w\s-]/g, "")
+      .trim();
 
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${safeTitle}.webm"`
+      `attachment; filename="${title}.webm"`
     );
     res.setHeader("Content-Type", "audio/webm");
 
-    const stream = await info.download({
-      type: "audio",
-      quality: "best"
-    });
-
+    const stream = await info.download({ type: "audio", quality: "best" });
     stream.pipe(res);
-  } catch (err) {
-    console.error("🔥 ERROR DOWNLOAD:", err);
-    res.status(500).send("Error descargando audio");
+  } catch {
+    res.sendStatus(500);
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Backend MYMUSICK en http://localhost:${PORT}`);
-});
-
+app.listen(PORT);
