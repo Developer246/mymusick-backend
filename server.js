@@ -37,7 +37,12 @@ app.get("/search", async (req, res) => {
       .filter(item => item?.id)
       .slice(0, 10)
       .map(item => ({
-        title: item.title?.text || "Sin título",
+        title:
+        item.title?.text ||
+        item.title?.runs?.map(r => r.text).join("") ||
+        item.flex_columns?.[0]?.text?.runs?.map(r => r.text).join("") ||
+        "Sin título",
+        
         artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
         album: item.album?.name || null,
         thumbnail: item.thumbnails?.slice(-1)[0]?.url || null,
