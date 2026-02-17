@@ -23,14 +23,19 @@ app.get("/search", async (req, res) => {
     if (!section) return res.json([]);
 
     const songs = section.contents
-      .filter(item => item?.id)
+      .filter(i => i?.id)
       .slice(0, 10)
-      .map(item => ({
-        id: item.id,
-        title: item.name?.text || "Sin título",
-        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: item.album?.name || null,
-        thumbnail: item.thumbnails?.at(-1)?.url || null
+      .map(i => ({
+        id: i.id,
+        title:
+          i.flex_columns?.[0]?.text?.runs
+            ?.map(r => r.text)
+            .join("")
+            .trim()
+          || "Sin título",
+        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: i.album?.name || null,
+        thumbnail: i.thumbnails?.at(-1)?.url || null
       }));
 
     res.json(songs);
@@ -41,8 +46,6 @@ app.get("/search", async (req, res) => {
 
 app.get("/audio/:id", async (req, res) => {
   try {
-    if (!yt) return res.sendStatus(503);
-
     const info = await yt.getInfo(req.params.id);
     const stream = await info.download({ type: "audio", quality: "best" });
 
@@ -57,8 +60,6 @@ app.get("/audio/:id", async (req, res) => {
 
 app.get("/download/:id", async (req, res) => {
   try {
-    if (!yt) return res.sendStatus(503);
-
     const info = await yt.getInfo(req.params.id);
     const title = (info.basic_info?.title || "audio")
       .replace(/[^\w\s-]/g, "")
@@ -77,6 +78,5 @@ app.get("/download/:id", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT);
+app.listen(process.env.PORT || 3000);
 
