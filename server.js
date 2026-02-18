@@ -11,7 +11,7 @@ let yt = null;
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB_REMIX"
+      client_type: "WEB"
     });
     console.log("YouTube Music inicializado");
   } catch (err) {
@@ -83,9 +83,11 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
     const stream = await info.download({
-      type: "audio",
-      quality: "best"
-    });
+  type: "audio",
+  format: "webm",
+  quality: "medium"
+});
+
 
     res.setHeader("Content-Type", "audio/webm");
     res.setHeader("Accept-Ranges", "bytes");
