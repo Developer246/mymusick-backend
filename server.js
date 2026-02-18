@@ -45,20 +45,22 @@ app.get("/search", requireYT, async (req, res) => {
     );
     if (!section) return res.json([]);
 
-    const songs = section.contents
+    const baseSongs = section.contents
       .filter(i => i?.id)
-      .slice(0, 10)
-      .map(i => {
-        const title =
-          i.title?.text ||
-          i.name ||
-          i.flex_columns?.[0]?.text?.runs?.map(r => r.text).join("") ||
-          i.flex_columns?.[1]?.text?.runs?.map(r => r.text).join("") ||
-          "Sin título";
+      .slice(0, 10);
+
+    const songs = await Promise.all(
+      baseSongs.map(async i => {
+        let title = "Sin título";
+
+        try {
+          const info = await yt.getInfo(i.id);
+          title = info.basic_info?.title || title;
+        } catch {}
 
         return {
           id: i.id,
-          title: title.trim(),
+          title,
           artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
           album: i.album?.name || null,
           thumbnail: i.thumbnails
@@ -66,7 +68,8 @@ app.get("/search", requireYT, async (req, res) => {
             ?.url
             ?.replace(/w\d+-h\d+/, "w544-h544")
         };
-      });
+      })
+    );
 
     res.json(songs);
   } catch (err) {
@@ -74,8 +77,6 @@ app.get("/search", requireYT, async (req, res) => {
     res.status(500).json([]);
   }
 });
-
-
 
 /* 🎧 Streaming de audio */
 app.get("/audio/:id", requireYT, async (req, res) => {
