@@ -49,31 +49,20 @@ app.get("/search", requireYT, async (req, res) => {
       .filter(i => i?.id)
       .slice(0, 10);
 
-    const songs = await Promise.all(
-      baseSongs.map(async i => {
-        let title = "Sin título";
+    const songs = section.contents
+  .filter(i => i?.id)
+  .slice(0, 10)
+  .map(i => ({
+    id: i.id,
+    title: i.name || i.title || "Sin título",
+    artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+    album: i.album?.name || null,
+    thumbnail: i.thumbnails
+      ?.at(-1)
+      ?.url
+      ?.replace(/w\d+-h\d+/, "w544-h544")
+  }));
 
-        try {
-          const info = await yt.getInfo(i.id);
-          title =
-          info.music?.track?.title ||
-          info.basic_info?.title ||
-          title;
-
-        } catch {}
-
-        return {
-          id: i.id,
-          title,
-          artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-          album: i.album?.name || null,
-          thumbnail: i.thumbnails
-            ?.at(-1)
-            ?.url
-            ?.replace(/w\d+-h\d+/, "w544-h544")
-        };
-      })
-    );
 
     res.json(songs);
   } catch (err) {
