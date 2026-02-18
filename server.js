@@ -11,7 +11,7 @@ let yt = null;
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB"
+      client_type: "WEB-REMIX"
     });
     console.log("YouTube Music inicializado");
   } catch (err) {
