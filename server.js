@@ -55,7 +55,11 @@ app.get("/search", requireYT, async (req, res) => {
 
         try {
           const info = await yt.getInfo(i.id);
-          title = info.basic_info?.title || title;
+          title =
+          info.music?.track?.title ||
+          info.basic_info?.title ||
+          title;
+
         } catch {}
 
         return {
