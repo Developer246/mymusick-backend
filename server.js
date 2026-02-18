@@ -46,25 +46,35 @@ app.get("/search", requireYT, async (req, res) => {
     if (!section) return res.json([]);
 
     const songs = section.contents
-  .filter(i => i?.id)
-  .slice(0, 10)
-  .map(i => {
-    const title =
-      i.title?.text ||
-      i.name ||
-      i.flex_columns?.[0]?.text?.runs?.map(r => r.text).join("") ||
-      i.flex_columns?.[1]?.text?.runs?.map(r => r.text).join("") ||
-      "Sin título";
+      .filter(i => i?.id)
+      .slice(0, 10)
+      .map(i => {
+        const title =
+          i.title?.text ||
+          i.name ||
+          i.flex_columns?.[0]?.text?.runs?.map(r => r.text).join("") ||
+          i.flex_columns?.[1]?.text?.runs?.map(r => r.text).join("") ||
+          "Sin título";
 
-    return {
-      id: i.id,
-      title: title.trim(),
-      artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-      album: i.album?.name || null,
-      thumbnail: i.thumbnails?.at(-1)?.url?.replace(/w\d+-h\d+/, "w544-h544")
+        return {
+          id: i.id,
+          title: title.trim(),
+          artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+          album: i.album?.name || null,
+          thumbnail: i.thumbnails
+            ?.at(-1)
+            ?.url
+            ?.replace(/w\d+-h\d+/, "w544-h544")
+        };
+      });
 
-    };
-  });
+    res.json(songs);
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json([]);
+  }
+});
+
 
 
 /* 🎧 Streaming de audio */
