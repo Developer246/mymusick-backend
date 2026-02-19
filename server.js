@@ -119,30 +119,61 @@ app.get("/download/:id", requireYT, async (req, res) => {
 });
 
 app.get("/lyrics/search", async (req, res) => {
-  const { q, limit = 5 } = req.query;
-  if (!q) return res.status(400).json({ error: "Query requerida" });
-
   try {
-    const url = `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`;
-    const response = await fetch(url);
+    const q = req.query.q?.trim();
+    let limit = parseInt(req.query.limit, 10);
+
+    if (!q) {
+      return res.status(400).json({ error: "Query requerida" });
+    }
+
+    if (isNaN(limit) || limit <= 0) {
+      limit = 5;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(
+      `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+      { signal: controller.signal }
+    );
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
-      return res.status(response.status).json({ error: "Error API lyrics" });
+      return res.status(response.status).json({
+        error: "Error API lyrics",
+        status: response.status
+      });
     }
 
     const data = await response.json();
 
-    res.json(
-      data.results.map(song => ({
-        title: song.title,
-        artists: song.artists,
-        id: song.id
-      }))
-    );
+    if (!data?.results || !Array.isArray(data.results)) {
+      return res.json([]);
+    }
+
+    const formatted = data.results.map(song => ({
+      id: song.id,
+      title: song.title || "Sin título",
+      artists: Array.isArray(song.artists)
+        ? song.artists.join(", ")
+        : "Desconocido"
+    }));
+
+    res.json(formatted);
+
   } catch (err) {
+    if (err.name === "AbortError") {
+      return res.status(504).json({ error: "Lyrics API timeout" });
+    }
+
+    console.error("Lyrics error:", err);
     res.status(500).json({ error: "Lyrics service unavailable" });
   }
 });
+
 
 /* -------------------- ARRANQUE CONTROLADO -------------------- */
 async function start() {
