@@ -2,19 +2,34 @@ const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
 
+/* =======================================================
+   FETCH COMPATIBLE CON RENDER
+======================================================= */
+
+let fetchFn;
+
+if (typeof fetch === "undefined") {
+  fetchFn = (...args) =>
+    import("node-fetch").then(({ default: fetch }) => fetch(...args));
+} else {
+  fetchFn = fetch;
+}
+
+/* =======================================================
+   APP CONFIG
+======================================================= */
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* =======================================================
-   VARIABLES GLOBALES
-======================================================= */
-
-let yt = null;
 const PORT = process.env.PORT || 3000;
 
+let yt = null;
+const lyricsCache = new Map();
+
 /* =======================================================
-   INICIALIZACIÓN SEGURA DE YOUTUBE
+   INIT YOUTUBE
 ======================================================= */
 
 async function initYouTube() {
@@ -22,17 +37,12 @@ async function initYouTube() {
     yt = await Innertube.create({
       client_type: "WEB_REMIX"
     });
-
     console.log("🎵 YouTube Music listo");
   } catch (err) {
     console.error("❌ Error iniciando YouTube:", err);
     process.exit(1);
   }
 }
-
-/* =======================================================
-   MIDDLEWARE
-======================================================= */
 
 function requireYT(req, res, next) {
   if (!yt) {
@@ -42,7 +52,7 @@ function requireYT(req, res, next) {
 }
 
 /* =======================================================
-   RUTA DE SALUD
+   HEALTH
 ======================================================= */
 
 app.get("/health", (req, res) => {
@@ -54,7 +64,7 @@ app.get("/health", (req, res) => {
 });
 
 /* =======================================================
-   🔍 BUSCAR CANCIONES
+   SEARCH SONGS
 ======================================================= */
 
 app.get("/search", requireYT, async (req, res) => {
@@ -88,6 +98,7 @@ app.get("/search", requireYT, async (req, res) => {
       }));
 
     res.json(songs);
+
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({ error: "Error buscando canciones" });
@@ -95,7 +106,7 @@ app.get("/search", requireYT, async (req, res) => {
 });
 
 /* =======================================================
-   🎧 STREAMING CON SOPORTE RANGE (IMPORTANTE)
+   AUDIO STREAM
 ======================================================= */
 
 app.get("/audio/:id", requireYT, async (req, res) => {
@@ -121,7 +132,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
 });
 
 /* =======================================================
-   ⬇️ DESCARGA
+   DOWNLOAD
 ======================================================= */
 
 app.get("/download/:id", requireYT, async (req, res) => {
@@ -153,22 +164,31 @@ app.get("/download/:id", requireYT, async (req, res) => {
 });
 
 /* =======================================================
-   🎤 LYRICS CON TIMEOUT SEGURO
+   LYRICS SEARCH (CON CACHE + TIMEOUT)
 ======================================================= */
 
 app.get("/lyrics/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    let limit = parseInt(req.query.limit, 10) || 5;
+    let limit = parseInt(req.query.limit, 10);
 
     if (!q) {
       return res.status(400).json({ error: "Query requerida" });
     }
 
+    if (isNaN(limit) || limit <= 0) {
+      limit = 5;
+    }
+
+    const cacheKey = `${q}_${limit}`;
+    if (lyricsCache.has(cacheKey)) {
+      return res.json(lyricsCache.get(cacheKey));
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
 
-    const response = await fetch(
+    const response = await fetchFn(
       `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`,
       { signal: controller.signal }
     );
@@ -191,6 +211,8 @@ app.get("/lyrics/search", async (req, res) => {
         : "Desconocido"
     }));
 
+    lyricsCache.set(cacheKey, formatted);
+
     res.json(formatted);
 
   } catch (err) {
@@ -204,7 +226,7 @@ app.get("/lyrics/search", async (req, res) => {
 });
 
 /* =======================================================
-   INICIO DEL SERVIDOR
+   START
 ======================================================= */
 
 async function start() {
@@ -218,7 +240,7 @@ async function start() {
 start();
 
 /* =======================================================
-   ANTI-CRASH GLOBAL
+   GLOBAL ERROR GUARD
 ======================================================= */
 
 process.on("unhandledRejection", err => {
@@ -228,5 +250,3 @@ process.on("unhandledRejection", err => {
 process.on("uncaughtException", err => {
   console.error("Uncaught Exception:", err);
 });
-
-
