@@ -118,6 +118,32 @@ app.get("/download/:id", requireYT, async (req, res) => {
   }
 });
 
+app.get("/lyrics/search", async (req, res) => {
+  const { q, limit = 5 } = req.query;
+  if (!q) return res.status(400).json({ error: "Query requerida" });
+
+  try {
+    const url = `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Error API lyrics" });
+    }
+
+    const data = await response.json();
+
+    res.json(
+      data.results.map(song => ({
+        title: song.title,
+        artists: song.artists,
+        id: song.id
+      }))
+    );
+  } catch (err) {
+    res.status(500).json({ error: "Lyrics service unavailable" });
+  }
+});
+
 /* -------------------- ARRANQUE CONTROLADO -------------------- */
 async function start() {
   try {
