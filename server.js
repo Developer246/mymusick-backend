@@ -4,35 +4,59 @@ const { Innertube } = require("youtubei.js");
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+/* =======================================================
+   VARIABLES GLOBALES
+======================================================= */
 
 let yt = null;
+const PORT = process.env.PORT || 3000;
 
-/* -------------------- INICIALIZACIÓN SEGURA -------------------- */
+/* =======================================================
+   INICIALIZACIÓN SEGURA DE YOUTUBE
+======================================================= */
+
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB-REMIX"
+      client_type: "WEB_REMIX"
     });
-    console.log("YouTube Music inicializado");
+
+    console.log("🎵 YouTube Music listo");
   } catch (err) {
-    console.error("Error iniciando Innertube:", err);
-    throw err;
+    console.error("❌ Error iniciando YouTube:", err);
+    process.exit(1);
   }
 }
 
-/* -------------------- MIDDLEWARE DE SALUD -------------------- */
+/* =======================================================
+   MIDDLEWARE
+======================================================= */
+
 function requireYT(req, res, next) {
-  if (!yt) return res.sendStatus(503);
+  if (!yt) {
+    return res.status(503).json({ error: "YouTube no inicializado" });
+  }
   next();
 }
 
-/* -------------------- RUTAS -------------------- */
+/* =======================================================
+   RUTA DE SALUD
+======================================================= */
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    youtube: !!yt,
+    uptime: process.uptime()
+  });
 });
 
-/* 🔍 Buscar canciones */
+/* =======================================================
+   🔍 BUSCAR CANCIONES
+======================================================= */
+
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -40,62 +64,70 @@ app.get("/search", requireYT, async (req, res) => {
 
     const search = await yt.music.search(q, { type: "song" });
 
-    const section = search.contents.find(s =>
+    const section = search.contents?.find(s =>
       Array.isArray(s?.contents)
     );
+
     if (!section) return res.json([]);
 
-    const baseSongs = section.contents
-      .filter(i => i?.id)
-      .slice(0, 10);
-
     const songs = section.contents
-  .filter(i => i?.id)
-  .slice(0, 10)
-  .map(i => ({
-    id: i.id,
-    title: i.name || i.title || "Sin título",
-    artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-    album: i.album?.name || null,
-    thumbnail: i.thumbnails
-      ?.at(-1)
-      ?.url
-      ?.replace(/w\d+-h\d+/, "w544-h544")
-  }));
-
+      .filter(i => i?.id)
+      .slice(0, 10)
+      .map(i => ({
+        id: i.id,
+        title: i.name || i.title || "Sin título",
+        artist:
+          i.artists?.map(a => a.name).join(", ") ||
+          "Desconocido",
+        album: i.album?.name || null,
+        duration: i.duration?.text || null,
+        thumbnail: i.thumbnails
+          ?.at(-1)
+          ?.url
+          ?.replace(/w\d+-h\d+/, "w544-h544")
+      }));
 
     res.json(songs);
   } catch (err) {
     console.error("Search error:", err);
-    res.status(500).json([]);
+    res.status(500).json({ error: "Error buscando canciones" });
   }
 });
 
-/* 🎧 Streaming de audio */
+/* =======================================================
+   🎧 STREAMING CON SOPORTE RANGE (IMPORTANTE)
+======================================================= */
+
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
-    const stream = await info.download({
-  type: "audio",
-  format: "webm",
-  quality: "medium"
-});
 
+    const stream = await info.download({
+      type: "audio",
+      format: "webm",
+      quality: "medium"
+    });
 
     res.setHeader("Content-Type", "audio/webm");
+    res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Accept-Ranges", "bytes");
 
     stream.pipe(res);
+
   } catch (err) {
     console.error("Audio error:", err);
-    res.sendStatus(500);
+    res.status(500).json({ error: "No se pudo reproducir el audio" });
   }
 });
 
-/* ⬇️ Descarga de audio */
+/* =======================================================
+   ⬇️ DESCARGA
+======================================================= */
+
 app.get("/download/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
+
     const title = (info.basic_info?.title || "audio")
       .replace(/[^\w\s-]/g, "")
       .trim();
@@ -104,6 +136,7 @@ app.get("/download/:id", requireYT, async (req, res) => {
       "Content-Disposition",
       `attachment; filename="${title}.webm"`
     );
+
     res.setHeader("Content-Type", "audio/webm");
 
     const stream = await info.download({
@@ -112,23 +145,24 @@ app.get("/download/:id", requireYT, async (req, res) => {
     });
 
     stream.pipe(res);
+
   } catch (err) {
     console.error("Download error:", err);
-    res.sendStatus(500);
+    res.status(500).json({ error: "No se pudo descargar el audio" });
   }
 });
+
+/* =======================================================
+   🎤 LYRICS CON TIMEOUT SEGURO
+======================================================= */
 
 app.get("/lyrics/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    let limit = parseInt(req.query.limit, 10);
+    let limit = parseInt(req.query.limit, 10) || 5;
 
     if (!q) {
       return res.status(400).json({ error: "Query requerida" });
-    }
-
-    if (isNaN(limit) || limit <= 0) {
-      limit = 5;
     }
 
     const controller = new AbortController();
@@ -143,16 +177,13 @@ app.get("/lyrics/search", async (req, res) => {
 
     if (!response.ok) {
       return res.status(response.status).json({
-        error: "Error API lyrics",
-        status: response.status
+        error: "Error API lyrics"
       });
     }
 
     const data = await response.json();
-console.log("Respuesta real API:", JSON.stringify(data, null, 2));
 
-
-    const formatted = data.results.map(song => ({
+    const formatted = (data.results || []).map(song => ({
       id: song.id,
       title: song.title || "Sin título",
       artists: Array.isArray(song.artists)
@@ -164,33 +195,32 @@ console.log("Respuesta real API:", JSON.stringify(data, null, 2));
 
   } catch (err) {
     if (err.name === "AbortError") {
-      return res.status(504).json({ error: "Lyrics API timeout" });
+      return res.status(504).json({ error: "Lyrics timeout" });
     }
 
     console.error("Lyrics error:", err);
-    res.status(500).json({ error: "Lyrics service unavailable" });
+    res.status(500).json({ error: "Servicio de lyrics no disponible" });
   }
 });
 
+/* =======================================================
+   INICIO DEL SERVIDOR
+======================================================= */
 
-/* -------------------- ARRANQUE CONTROLADO -------------------- */
 async function start() {
-  try {
-    await initYouTube();
+  await initYouTube();
 
-    const PORT = process.env.PORT || 3000;
-    app.listen(PORT, () => {
-      console.log("Servidor activo en puerto", PORT);
-    });
-  } catch {
-    console.error("No se pudo iniciar el servidor");
-    process.exit(1);
-  }
+  app.listen(PORT, () => {
+    console.log(`🚀 Servidor activo en puerto ${PORT}`);
+  });
 }
 
 start();
 
-/* -------------------- ANTI-CRASH GLOBAL -------------------- */
+/* =======================================================
+   ANTI-CRASH GLOBAL
+======================================================= */
+
 process.on("unhandledRejection", err => {
   console.error("Unhandled Rejection:", err);
 });
@@ -198,4 +228,5 @@ process.on("unhandledRejection", err => {
 process.on("uncaughtException", err => {
   console.error("Uncaught Exception:", err);
 });
+
 
