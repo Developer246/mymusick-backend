@@ -149,10 +149,8 @@ app.get("/lyrics/search", async (req, res) => {
     }
 
     const data = await response.json();
+console.log("Respuesta real API:", JSON.stringify(data, null, 2));
 
-    if (!data?.results || !Array.isArray(data.results)) {
-      return res.json([]);
-    }
 
     const formatted = data.results.map(song => ({
       id: song.id,
