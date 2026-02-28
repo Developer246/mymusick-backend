@@ -101,33 +101,19 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
 
-    const formats = info.streaming_data?.adaptive_formats
-      ?.filter(f =>
-        f.mime_type?.includes("audio") &&
-        f.url
-      );
-
-    if (!formats?.length) {
-      return res.status(404).json({
-        error: "Audio no disponible"
-      });
-    }
-
-    const best = formats.sort((a, b) =>
-      (b.bitrate || 0) - (a.bitrate || 0)
-    )[0];
-
-    res.setHeader("Content-Type", best.mime_type.split(";")[0]);
-    res.setHeader("Accept-Ranges", "bytes");
-
-    const stream = await yt.download({
-      url: best.url
+    const stream = await info.download({
+      type: "audio",
+      quality: "best"
     });
+
+    res.setHeader("Content-Type", "audio/webm");
+    res.setHeader("Accept-Ranges", "bytes");
 
     stream.pipe(res);
 
   } catch (err) {
-    console.error("AUDIO ERROR:", err);
+    console.error("🔥 AUDIO ERROR REAL:", err);
+
     res.status(500).json({
       error: "No se pudo reproducir el audio",
       detail: err.message
