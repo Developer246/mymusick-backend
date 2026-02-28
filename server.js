@@ -35,7 +35,7 @@ const lyricsCache = new Map();
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB"
+      client_type: "WEB_REMIX"
     });
     console.log("🎵 YouTube Music listo");
   } catch (err) {
@@ -135,31 +135,33 @@ app.get("/audio/:id", requireYT, async (req, res) => {
    DOWNLOAD
 ======================================================= */
 
-app.get("/download/:id", requireYT, async (req, res) => {
+app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
 
-    const title = (info.basic_info?.title || "audio")
-      .replace(/[^\w\s-]/g, "")
-      .trim();
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${title}.webm"`
-    );
-
-    res.setHeader("Content-Type", "audio/webm");
-
     const stream = await info.download({
       type: "audio",
-      quality: "best"
+      quality: "best",
+      client: "WEB",
+      format: "mp4"
+    });
+
+    res.setHeader("Content-Type", "audio/mp4");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    stream.on("error", (err) => {
+      console.error("Stream error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Stream interrumpido" });
+      }
     });
 
     stream.pipe(res);
 
   } catch (err) {
-    console.error("Download error:", err);
-    res.status(500).json({ error: "No se pudo descargar el audio" });
+    console.error("Audio error FULL:", err);
+    res.status(500).json({ error: "No se pudo reproducir el audio" });
   }
 });
 
