@@ -30,12 +30,12 @@ app.get("/search", async (req, res) => {
     const results = await yt.music.search(query, { type: "song" });
     console.log("Resultados:", JSON.stringify(results, null, 2));
 
-    const songs = results?.songs?.map(song => ({
-      id: song.id,
-      title: song.title?.text || "",
-      artist: song.artists?.map(a => a.name).join(", ") || "",
-      duration: song.duration?.text || "",
-      thumbnail: song.thumbnails?.[0]?.url || ""
+    const songs = results.contents?.map(item => ({
+      id: item.id,
+      title: item.title?.text || "",
+      artist: item.artists?.map(a => a.name).join(", ") || "",
+      duration: item.duration?.text || "",
+      thumbnail: item.thumbnails?.[0]?.url || ""
     })) || [];
 
     res.json(songs);
@@ -45,6 +45,7 @@ app.get("/search", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 
 
 app.get("/audio/:id", async (req, res) => {
