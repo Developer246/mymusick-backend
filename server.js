@@ -99,7 +99,7 @@ app.get("/search", requireYT, async (req, res) => {
 ======================================================= */
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
-    const info = await yt.getInfo(req.params.id);
+    const info = await yt.music.getInfo(req.params.id);
 
     if (!info?.streaming_data?.adaptive_formats) {
       return res.status(500).json({
@@ -115,7 +115,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
 
     if (!audioFormats.length) {
       return res.status(404).json({
-        error: "No hay formatos de audio disponibles"
+        error: "No hay audio disponible"
       });
     }
 
@@ -133,7 +133,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     stream.pipe(res);
 
   } catch (err) {
-    console.error("🔥 AUDIO ERROR REAL:", err);
+    console.error("🔥 AUDIO ERROR:", err);
 
     res.status(500).json({
       error: "No se pudo reproducir el audio",
