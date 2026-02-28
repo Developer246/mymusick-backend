@@ -15,7 +15,7 @@
   "cors": "^2.8.5",
   "express": "^4.19.2",
   "yt-dlp-wrap": "^2.3.12",
-  "youtubei.js": "^1.5.3"
+  "youtubei.js": "^16.0.1"
 },
   "devDependencies": {
     "nodemon": "^3.0.1"
