@@ -12,10 +12,11 @@
     "node": "20.x"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "yt-dlp-wrap": "^2.3.12"
-  },
+  "cors": "^2.8.5",
+  "express": "^4.19.2",
+  "yt-dlp-wrap": "^2.3.12",
+  "youtubei.js": "^1.5.3"
+},
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
