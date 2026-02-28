@@ -101,29 +101,43 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
 
-    const format = info.streaming_data?.adaptive_formats
-      ?.filter(f => f.mime_type?.includes("audio"))
-      ?.sort((a, b) => b.bitrate - a.bitrate)[0];
-
-    if (!format) {
-      return res.status(404).json({
-        error: "No hay formato de audio disponible"
+    if (!info?.streaming_data?.adaptive_formats) {
+      return res.status(500).json({
+        error: "Streaming data no disponible"
       });
     }
 
-    const stream = await yt.download({
-      url: format.url
-    });
+    const audioFormats = info.streaming_data.adaptive_formats
+      .filter(f =>
+        f.mime_type?.includes("audio") &&
+        f.url
+      );
 
-    res.setHeader("Content-Type", format.mime_type.split(";")[0]);
+    if (!audioFormats.length) {
+      return res.status(404).json({
+        error: "No hay formatos de audio disponibles"
+      });
+    }
+
+    const best = audioFormats.sort((a, b) =>
+      (b.bitrate || 0) - (a.bitrate || 0)
+    )[0];
+
+    res.setHeader("Content-Type", best.mime_type.split(";")[0]);
     res.setHeader("Accept-Ranges", "bytes");
+
+    const stream = await yt.download({
+      url: best.url
+    });
 
     stream.pipe(res);
 
   } catch (err) {
-    console.error("Audio error real:", err);
+    console.error("🔥 AUDIO ERROR REAL:", err);
+
     res.status(500).json({
-      error: "No se pudo reproducir el audio"
+      error: "No se pudo reproducir el audio",
+      detail: err.message
     });
   }
 });
