@@ -1,11 +1,11 @@
 {
   "name": "mymusick-backend",
   "version": "1.0.0",
-  "description": "YouTube audio streaming backend",
+  "description": "Backend para streaming de audio desde YouTube Music",
   "main": "server.js",
   "type": "commonjs",
   "engines": {
-    "node": "20.x"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "start": "node server.js",
@@ -14,10 +14,11 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "yt-dlp-exec": "1.0.2",
     "youtubei.js": "^16.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
-  }
+  },
+  "license": "MIT"
 }
+
