@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB_REMIX"
+      client_type: "WEB"
     });
 
     console.log("🎵 YouTube Music listo");
@@ -99,27 +99,21 @@ app.get("/search", requireYT, async (req, res) => {
 ======================================================= */
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
-    const info = await yt.music.getInfo(req.params.id);
+    const info = await yt.getInfo(req.params.id);
 
-    if (!info?.streaming_data?.adaptive_formats) {
-      return res.status(500).json({
-        error: "Streaming data no disponible"
-      });
-    }
-
-    const audioFormats = info.streaming_data.adaptive_formats
-      .filter(f =>
+    const formats = info.streaming_data?.adaptive_formats
+      ?.filter(f =>
         f.mime_type?.includes("audio") &&
         f.url
       );
 
-    if (!audioFormats.length) {
+    if (!formats?.length) {
       return res.status(404).json({
-        error: "No hay audio disponible"
+        error: "Audio no disponible"
       });
     }
 
-    const best = audioFormats.sort((a, b) =>
+    const best = formats.sort((a, b) =>
       (b.bitrate || 0) - (a.bitrate || 0)
     )[0];
 
@@ -133,8 +127,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     stream.pipe(res);
 
   } catch (err) {
-    console.error("🔥 AUDIO ERROR:", err);
-
+    console.error("AUDIO ERROR:", err);
     res.status(500).json({
       error: "No se pudo reproducir el audio",
       detail: err.message
