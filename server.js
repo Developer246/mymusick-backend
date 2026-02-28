@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB",
+      client_type: "YTMUSIC",
       generate_session_locally: true
       // Si usas cookies reales:
       // cookie: fs.readFileSync("cookies.txt", "utf-8")
