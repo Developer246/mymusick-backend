@@ -109,26 +109,31 @@ app.get("/search", requireYT, async (req, res) => {
    AUDIO STREAM
 ======================================================= */
 
-app.get("/audio/:id", requireYT, async (req, res) => {
-  try {
-    const info = await yt.getInfo(req.params.id);
+const { exec } = require("child_process");
 
-    const stream = await info.download({
-      type: "audio",
-      format: "webm",
-      quality: "medium"
-    });
+app.get("/audio/:id", async (req, res) => {
+  const videoId = req.params.id;
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
 
-    res.setHeader("Content-Type", "audio/webm");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Accept-Ranges", "bytes");
+  res.setHeader("Content-Type", "audio/mpeg");
+  res.setHeader("Cache-Control", "no-cache");
 
-    stream.pipe(res);
+  const process = exec(
+    `yt-dlp -f bestaudio -o - ${url}`,
+    { maxBuffer: 1024 * 1024 * 10 }
+  );
 
-  } catch (err) {
-    console.error("Audio error:", err);
-    res.status(500).json({ error: "No se pudo reproducir el audio" });
-  }
+  process.stdout.pipe(res);
+
+  process.stderr.on("data", (err) => {
+    console.error("yt-dlp error:", err.toString());
+  });
+
+  process.on("close", (code) => {
+    if (code !== 0) {
+      res.end();
+    }
+  });
 });
 
 /* =======================================================
