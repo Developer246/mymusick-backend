@@ -1,31 +1,30 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const { Innertube } = require("youtubei.js");
+const ytdlp = require("yt-dlp-exec");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* =======================================================
-   VARIABLES GLOBALES
-======================================================= */
-
 let yt = null;
 const PORT = process.env.PORT || 3000;
 
 /* =======================================================
-   INICIALIZACIÓN SEGURA DE YOUTUBE
+   INICIALIZACIÓN SEGURA
 ======================================================= */
 
-const fs = require("fs");
+async function initYouTube() {
+  try {
+    yt = await Innertube.create({
+      client_type: "WEB",
+      generate_session_locally: true
+      // Si usas cookies reales:
+      // cookie: fs.readFileSync("cookies.txt", "utf-8")
+    });
 
-yt = await Innertube.create({
-  client_type: "WEB",
-  generate_session_locally: true,
-  cookie: fs.readFileSync("cookies.txt", "utf-8")
-});
-
-    console.log("🎵 YouTube Music listo");
+    console.log("🎵 YouTube inicializado");
   } catch (err) {
     console.error("❌ Error iniciando YouTube:", err);
     process.exit(1);
@@ -44,7 +43,7 @@ function requireYT(req, res, next) {
 }
 
 /* =======================================================
-   RUTA DE SALUD
+   HEALTH
 ======================================================= */
 
 app.get("/health", (req, res) => {
@@ -56,7 +55,7 @@ app.get("/health", (req, res) => {
 });
 
 /* =======================================================
-   🔍 BUSCAR CANCIONES
+   🔍 SEARCH (youtubei.js)
 ======================================================= */
 
 app.get("/search", requireYT, async (req, res) => {
@@ -64,32 +63,21 @@ app.get("/search", requireYT, async (req, res) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q, { type: "song" });
+    const search = await yt.search(q);
 
-    const section = search.contents?.find(s =>
-      Array.isArray(s?.contents)
-    );
-
-    if (!section) return res.json([]);
-
-    const songs = section.contents
-      .filter(i => i?.id)
+    const videos = search.results
+      .filter(v => v.type === "Video")
       .slice(0, 10)
-      .map(i => ({
-        id: i.id,
-        title: i.name || i.title || "Sin título",
-        artist:
-          i.artists?.map(a => a.name).join(", ") ||
-          "Desconocido",
-        album: i.album?.name || null,
-        duration: i.duration?.text || null,
-        thumbnail: i.thumbnails
-          ?.at(-1)
-          ?.url
-          ?.replace(/w\d+-h\d+/, "w544-h544")
+      .map(v => ({
+        id: v.id,
+        title: v.title,
+        artist: v.author?.name || "Desconocido",
+        duration: v.duration?.text || null,
+        thumbnail: v.thumbnails?.at(-1)?.url
       }));
 
-    res.json(songs);
+    res.json(videos);
+
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({ error: "Error buscando canciones" });
@@ -97,86 +85,83 @@ app.get("/search", requireYT, async (req, res) => {
 });
 
 /* =======================================================
-   🎧 STREAMING CON SOPORTE RANGE (IMPORTANTE)
+   🎧 STREAMING (yt-dlp)
 ======================================================= */
-app.get("/audio/:id", requireYT, async (req, res) => {
-  try {
-    const info = await yt.getInfo(req.params.id);
 
-    const stream = await info.download({
-      type: "audio",
-      quality: "best"
-    });
+app.get("/audio/:id", async (req, res) => {
+  try {
+    const videoUrl = `https://www.youtube.com/watch?v=${req.params.id}`;
 
     res.setHeader("Content-Type", "audio/webm");
     res.setHeader("Accept-Ranges", "bytes");
 
-    stream.pipe(res);
+    const process = ytdlp.exec(videoUrl, {
+      format: "bestaudio",
+      output: "-",
+      quiet: true,
+      noWarnings: true
+    });
+
+    process.stdout.pipe(res);
+
+    process.stderr.on("data", data => {
+      console.error("yt-dlp:", data.toString());
+    });
+
+    process.on("error", err => {
+      console.error("Process error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "No se pudo reproducir el audio" });
+      }
+    });
 
   } catch (err) {
-    console.error("🔥 AUDIO ERROR REAL:", err);
-
-    res.status(500).json({
-      error: "No se pudo reproducir el audio",
-      detail: err.message
-    });
+    console.error("Audio error:", err);
+    res.status(500).json({ error: "Error interno" });
   }
 });
 
 /* =======================================================
-   ⬇️ DESCARGA
+   ⬇️ DOWNLOAD
 ======================================================= */
 
-app.get("/download/:id", requireYT, async (req, res) => {
+app.get("/download/:id", async (req, res) => {
   try {
-    const info = await yt.getInfo(req.params.id);
-
-    const title = (info.basic_info?.title || "audio")
-      .replace(/[^\w\s-]/g, "")
-      .trim();
+    const videoUrl = `https://www.youtube.com/watch?v=${req.params.id}`;
 
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${title}.webm"`
+      `attachment; filename="audio.webm"`
     );
-
     res.setHeader("Content-Type", "audio/webm");
 
-    const stream = await info.download({
-      type: "audio",
-      quality: "best"
+    const process = ytdlp.exec(videoUrl, {
+      format: "bestaudio",
+      output: "-"
     });
 
-    stream.pipe(res);
+    process.stdout.pipe(res);
 
   } catch (err) {
-    console.error("Download error:", err);
-    res.status(500).json({ error: "No se pudo descargar el audio" });
+    console.error(err);
+    res.status(500).json({ error: "No se pudo descargar" });
   }
 });
 
 /* =======================================================
-   🎤 LYRICS CON TIMEOUT SEGURO
+   🎤 LYRICS
 ======================================================= */
 
 app.get("/lyrics/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    let limit = parseInt(req.query.limit, 10) || 5;
-
     if (!q) {
       return res.status(400).json({ error: "Query requerida" });
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
     const response = await fetch(
-      `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`,
-      { signal: controller.signal }
+      `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(q)}&limit=5`
     );
-
-    clearTimeout(timeout);
 
     if (!response.ok) {
       return res.status(response.status).json({
@@ -197,17 +182,13 @@ app.get("/lyrics/search", async (req, res) => {
     res.json(formatted);
 
   } catch (err) {
-    if (err.name === "AbortError") {
-      return res.status(504).json({ error: "Lyrics timeout" });
-    }
-
     console.error("Lyrics error:", err);
     res.status(500).json({ error: "Servicio de lyrics no disponible" });
   }
 });
 
 /* =======================================================
-   INICIO DEL SERVIDOR
+   START
 ======================================================= */
 
 async function start() {
@@ -221,7 +202,7 @@ async function start() {
 start();
 
 /* =======================================================
-   ANTI-CRASH GLOBAL
+   ANTI-CRASH
 ======================================================= */
 
 process.on("unhandledRejection", err => {
