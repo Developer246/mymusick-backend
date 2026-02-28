@@ -35,7 +35,7 @@ const lyricsCache = new Map();
 async function initYouTube() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB_REMIX"
+      client_type: "WEB"
     });
     console.log("🎵 YouTube Music listo");
   } catch (err) {
