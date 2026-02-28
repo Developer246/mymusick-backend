@@ -18,27 +18,34 @@ async function initYT() {
 
 app.get("/search", async (req, res) => {
   try {
+    if (!yt) {
+      return res.status(503).json({ error: "YouTube Music no está inicializado" });
+    }
+
     const query = req.query.q;
+    if (!query) {
+      return res.status(400).json({ error: "Falta parámetro q" });
+    }
 
-    const results = await yt.music.search(query, {
-      type: "song"
-    });
+    const results = await yt.music.search(query, { type: "song" });
+    console.log("Resultados:", JSON.stringify(results, null, 2));
 
-    const songs = results.songs.map(song => ({
+    const songs = results?.songs?.map(song => ({
       id: song.id,
       title: song.title?.text || "",
       artist: song.artists?.map(a => a.name).join(", ") || "",
       duration: song.duration?.text || "",
       thumbnail: song.thumbnails?.[0]?.url || ""
-    }));
+    })) || [];
 
     res.json(songs);
 
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Error buscando canciones" });
+    console.error("Error en /search:", error);
+    res.status(500).json({ error: error.message });
   }
 });
+
 
 app.get("/audio/:id", async (req, res) => {
   try {
