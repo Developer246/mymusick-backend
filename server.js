@@ -97,26 +97,34 @@ app.get("/search", requireYT, async (req, res) => {
 /* =======================================================
    🎧 STREAMING CON SOPORTE RANGE (IMPORTANTE)
 ======================================================= */
-
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
 
-    const stream = await info.download({
-      type: "audio",
-      format: "webm",
-      quality: "medium"
+    const format = info.streaming_data?.adaptive_formats
+      ?.filter(f => f.mime_type?.includes("audio"))
+      ?.sort((a, b) => b.bitrate - a.bitrate)[0];
+
+    if (!format) {
+      return res.status(404).json({
+        error: "No hay formato de audio disponible"
+      });
+    }
+
+    const stream = await yt.download({
+      url: format.url
     });
 
-    res.setHeader("Content-Type", "audio/webm");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Type", format.mime_type.split(";")[0]);
     res.setHeader("Accept-Ranges", "bytes");
 
     stream.pipe(res);
 
   } catch (err) {
-    console.error("Audio error:", err);
-    res.status(500).json({ error: "No se pudo reproducir el audio" });
+    console.error("Audio error real:", err);
+    res.status(500).json({
+      error: "No se pudo reproducir el audio"
+    });
   }
 });
 
