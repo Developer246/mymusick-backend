@@ -1,22 +1,24 @@
 {
   "name": "mymusick-backend",
   "version": "1.0.0",
+  "description": "YouTube Music streaming backend",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "postinstall": "npm rebuild"
   },
   "engines": {
-    "node": ">=18"
+    "node": "18.x"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "youtubei.js": "^10.4.0"
+    "youtubei.js": "latest",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   }
 }
-
