@@ -17,11 +17,13 @@ const PORT = process.env.PORT || 3000;
    INICIALIZACIÓN SEGURA DE YOUTUBE
 ======================================================= */
 
-async function initYouTube() {
-  try {
-    yt = await Innertube.create({
-      client_type: "WEB"
-    });
+const fs = require("fs");
+
+yt = await Innertube.create({
+  client_type: "WEB",
+  generate_session_locally: true,
+  cookie: fs.readFileSync("cookies.txt", "utf-8")
+});
 
     console.log("🎵 YouTube Music listo");
   } catch (err) {
