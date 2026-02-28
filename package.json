@@ -6,8 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
-    "postinstall": "npm rebuild"
+    "dev": "nodemon server.js"
   },
   "engines": {
     "node": "18.x"
@@ -15,7 +14,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "youtubei.js": "latest",
+    "youtubei.js": "^10.4.0",
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
