@@ -28,7 +28,7 @@ app.get("/search", async (req, res) => {
     }
 
     const results = await yt.music.search(query, { type: "song" });
-    console.log("Resultados:", JSON.stringify(results, null, 2));
+    console.log("Resultados crudos:", JSON.stringify(results, null, 2));
 
     const songs = results.contents?.map(item => ({
       id: item.id,
@@ -45,8 +45,6 @@ app.get("/search", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-
 
 app.get("/audio/:id", async (req, res) => {
   try {
