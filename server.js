@@ -4,30 +4,55 @@ const { Innertube } = require("youtubei.js");
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-let yt;
+let yt = null;
 
-// Inicializa YouTube Music con cookies desde variable de entorno
+/* =======================================================
+   INICIALIZACIÓN YOUTUBE MUSIC
+======================================================= */
+
 async function initYT() {
-  const cookie = process.env.YTM_COOKIE; // lee la cookie desde Render
+  const cookie = process.env.YTM_COOKIE;
+
   yt = await Innertube.create({
-    client_type: "ANDROID_MUSIC", // más confiable para streams
+    client_type: "ANDROID_MUSIC",
     cookie
   });
-  console.log("YouTube Music inicializado con cookies 🎵");
+
+  console.log("YouTube Music inicializado correctamente 🎵");
 }
 
-// Middleware para asegurar que yt esté listo
+/* =======================================================
+   MIDDLEWARE SEGURIDAD
+======================================================= */
+
 function requireYT(req, res, next) {
   if (!yt) {
-    return res.status(503).json({ error: "YouTube Music no está inicializado" });
+    return res.status(503).json({
+      error: "YouTube Music no está listo"
+    });
   }
   next();
 }
 
-// Endpoint de búsqueda
+/* =======================================================
+   HEALTH CHECK (IMPORTANTE PARA RENDER)
+======================================================= */
+
+app.get("/", (req, res) => {
+  res.json({
+    status: "ok",
+    service: "MYMUSICK Backend 🎧"
+  });
+});
+
+/* =======================================================
+   BUSCADOR DE CANCIONES
+======================================================= */
+
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -42,38 +67,49 @@ app.get("/search", requireYT, async (req, res) => {
       .filter(i => i?.videoId)
       .slice(0, 10)
       .map(i => {
-        // Selecciona la miniatura más grande disponible
-        const hdThumb = i.thumbnails?.reduce((best, thumb) => {
-          const currentSize = (thumb.width || 0) * (thumb.height || 0);
+        const bestThumb = i.thumbnails?.reduce((best, thumb) => {
+          const size = (thumb.width || 0) * (thumb.height || 0);
           const bestSize = (best?.width || 0) * (best?.height || 0);
-          return currentSize > bestSize ? thumb : best;
+          return size > bestSize ? thumb : best;
         }, null);
 
         return {
-          id: i.videoId ,// usar videoId si existe
-          title: i.name || i.title || "Sin título",
+          id: i.videoId,
+          title: (i.name || i.title || "Sin título")
+            .replace(/\(.*?\)/g, "")
+            .replace(/official|video/gi, "")
+            .trim(),
           artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
           album: i.album?.name || null,
           duration: i.duration?.text || null,
-          thumbnail: hdThumb?.url?.replace(/w\d+-h\d+/, "w1080-h1080") || null
+          thumbnail: bestThumb?.url || null
         };
       });
 
     res.json(songs);
+
   } catch (err) {
-    console.error("Search error:", err);
-    res.status(500).json({ error: "Error buscando canciones" });
+    console.error("SEARCH ERROR:", err);
+    res.status(500).json({
+      error: "Error buscando canciones"
+    });
   }
 });
 
-// Endpoint de audio con streaming directo
+/* =======================================================
+   STREAM DE AUDIO PROFESIONAL
+======================================================= */
+
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const id = req.params.id;
+
     const info = await yt.getInfo(id);
 
     if (info.playability_status?.status === "LOGIN_REQUIRED") {
-      return res.status(403).json({ error: "Este contenido requiere inicio de sesión en YouTube Music" });
+      return res.status(403).json({
+        error: "Contenido requiere login"
+      });
     }
 
     const stream = await info.download({
@@ -82,13 +118,25 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     });
 
     const mime = stream.mime_type || "audio/webm";
+
     res.setHeader("Content-Type", mime);
     res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-store");
+
+    if (req.headers.range) {
+      res.status(206);
+    }
 
     stream.pipe(res);
 
+    // Limpieza si el usuario cierra conexión
+    req.on("close", () => {
+      stream.destroy();
+    });
+
   } catch (err) {
-    console.error("🔥 AUDIO ERROR REAL:", err);
+    console.error("AUDIO ERROR:", err);
+
     res.status(500).json({
       error: "No se pudo reproducir el audio",
       detail: err.message
@@ -96,9 +144,21 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   }
 });
 
-// Arranca el servidor
-app.listen(PORT, async () => {
-  await initYT();
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
+/* =======================================================
+   INICIO SEGURO DEL SERVIDOR
+======================================================= */
+
+(async () => {
+  try {
+    await initYT();
+
+    app.listen(PORT, () => {
+      console.log(`Servidor MYMUSICK corriendo en puerto ${PORT} 🚀`);
+    });
+
+  } catch (err) {
+    console.error("Error inicializando YouTube Music:", err);
+    process.exit(1);
+  }
+})();
 
