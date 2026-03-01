@@ -11,7 +11,6 @@ let yt;
 
 // Inicializa YouTube Music
 async function initYT() {
-  // ANDROID_MUSIC suele devolver mejor los streams
   yt = await Innertube.create({ client_type: "ANDROID_MUSIC" });
   console.log("YouTube Music inicializado 🎵");
 }
@@ -32,21 +31,29 @@ app.get("/search", requireYT, async (req, res) => {
 
     const search = await yt.music.search(q, { type: "song" });
 
-    // Busca la sección que contiene canciones
     const section = search.contents?.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
     const songs = section.contents
       .filter(i => i?.id)
       .slice(0, 10)
-      .map(i => ({
-        id: i.id,
-        title: i.name || i.title || "Sin título",
-        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: i.album?.name || null,
-        duration: i.duration?.text || null,
-        thumbnail: i.thumbnails?.at(-1)?.url?.replace(/w\\d+-h\\d+/, "w544-h544")
-      }));
+      .map(i => {
+        // Selecciona la miniatura de mayor resolución disponible
+        const hdThumb = i.thumbnails?.reduce((best, thumb) => {
+          const currentSize = parseInt(thumb.width || 0) * parseInt(thumb.height || 0);
+          const bestSize = parseInt(best?.width || 0) * parseInt(best?.height || 0);
+          return currentSize > bestSize ? thumb : best;
+        }, null);
+
+        return {
+          id: i.id,
+          title: i.name || i.title || "Sin título",
+          artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+          album: i.album?.name || null,
+          duration: i.duration?.text || null,
+          thumbnail: hdThumb?.url?.replace(/w\d+-h\d+/, "w1080-h1080") || null
+        };
+      });
 
     res.json(songs);
   } catch (err) {
@@ -55,26 +62,29 @@ app.get("/search", requireYT, async (req, res) => {
   }
 });
 
-// Endpoint de audio
+// Endpoint de audio con streaming directo
 app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const id = req.params.id;
-    const info = await yt.music.getInfo(id);
+    const info = await yt.getInfo(id);
 
-    // Busca en adaptive_formats primero, luego en formats
-    const audioFormat =
-      info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
-      info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
+    const stream = await info.download({
+      type: "audio",
+      quality: "best"
+    });
 
-    if (!audioFormat) {
-      console.log("Streaming data:", JSON.stringify(info.streaming_data, null, 2));
-      return res.status(404).json({ error: "No se encontró audio" });
-    }
+    const mime = stream.mime_type || "audio/webm";
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Accept-Ranges", "bytes");
 
-    res.json({ url: audioFormat.url });
-  } catch (error) {
-    console.error("Audio error:", error);
-    res.status(500).json({ error: "Error obteniendo audio" });
+    stream.pipe(res);
+
+  } catch (err) {
+    console.error("🔥 AUDIO ERROR REAL:", err);
+    res.status(500).json({
+      error: "No se pudo reproducir el audio",
+      detail: err.message
+    });
   }
 });
 
@@ -83,4 +93,3 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
-
