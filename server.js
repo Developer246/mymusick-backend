@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const fs = require("fs");
 const { Innertube } = require("youtubei.js");
 
 const app = express();
@@ -9,10 +10,18 @@ const PORT = process.env.PORT || 3000;
 
 let yt;
 
-// Inicializa YouTube Music
+// Inicializa YouTube Music con cookies
 async function initYT() {
-  yt = await Innertube.create({ client_type: "WEB" });
-  console.log("YouTube Music inicializado 🎵");
+  // Lee cookies desde un archivo cookies.json
+  // cookies.json debe tener: { "cookie": "VISITOR_INFO1_LIVE=...; YSC=...; PREF=...; AUTH=..." }
+  const cookies = JSON.parse(fs.readFileSync("./cookies.json", "utf8"));
+
+  yt = await Innertube.create({
+    client_type: "ANDROID_MUSIC", // más confiable para streams
+    cookie: cookies.cookie
+  });
+
+  console.log("YouTube Music inicializado con cookies 🎵");
 }
 
 // Middleware para asegurar que yt esté listo
@@ -35,18 +44,18 @@ app.get("/search", requireYT, async (req, res) => {
     if (!section) return res.json([]);
 
     const songs = section.contents
-      .filter(i => i?.id)
+      .filter(i => i?.videoId || i?.id)
       .slice(0, 10)
       .map(i => {
-        // Selecciona la miniatura de mayor resolución disponible
+        // Selecciona la miniatura más grande disponible
         const hdThumb = i.thumbnails?.reduce((best, thumb) => {
-          const currentSize = parseInt(thumb.width || 0) * parseInt(thumb.height || 0);
-          const bestSize = parseInt(best?.width || 0) * parseInt(best?.height || 0);
+          const currentSize = (thumb.width || 0) * (thumb.height || 0);
+          const bestSize = (best?.width || 0) * (best?.height || 0);
           return currentSize > bestSize ? thumb : best;
         }, null);
 
         return {
-          id: i.id,
+          id: i.videoId || i.id, // usar videoId si existe
           title: i.name || i.title || "Sin título",
           artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
           album: i.album?.name || null,
@@ -67,6 +76,10 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   try {
     const id = req.params.id;
     const info = await yt.getInfo(id);
+
+    if (info.playability_status?.status === "LOGIN_REQUIRED") {
+      return res.status(403).json({ error: "Este contenido requiere inicio de sesión en YouTube Music" });
+    }
 
     const stream = await info.download({
       type: "audio",
@@ -93,3 +106,4 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
