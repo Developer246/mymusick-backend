@@ -33,74 +33,35 @@ app.get("/search", requireYT, async (req, res) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q);
-
-    // Imprime resultados crudos para depuración
-    console.log(JSON.stringify(search, null, 2));
-
+    const search = await yt.music.search(q, { type: "song" });
     const section = search.contents?.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
-    const results = section.contents.slice(0, 10).map(i => {
-      // Detecta tipo de resultado
-      let type = "other";
-      if (i.videoId) type = "song";
-      else if (i.album) type = "album";
-      else if (i.playlist) type = "playlist";
-      else if (i.artist) type = "artist";
+    const songs = section.contents
+      .filter(i => i?.videoId || i?.id)
+      .slice(0, 10)
+      .map(i => {
+        // Selecciona la miniatura más grande disponible
+        const hdThumb = i.thumbnails?.reduce((best, thumb) => {
+          const currentSize = (thumb.width || 0) * (thumb.height || 0);
+          const bestSize = (best?.width || 0) * (best?.height || 0);
+          return currentSize > bestSize ? thumb : best;
+        }, null);
 
-      // Selecciona miniatura más grande
-      const hdThumb = i.thumbnails?.reduce((best, thumb) => {
-        const currentSize = (thumb.width || 0) * (thumb.height || 0);
-        const bestSize = (best?.width || 0) * (best?.height || 0);
-        return currentSize > bestSize ? thumb : best;
-      }, null);
+        return {
+          id: i.videoId || i.id, // usar videoId si existe
+          title: i.name || i.title || "Sin título",
+          artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+          album: i.album?.name || null,
+          duration: i.duration?.text || null,
+          thumbnail: hdThumb?.url?.replace(/w\\d+-h\\d+/, "w1080-h1080") || null
+        };
+      });
 
-      return {
-        id: i.videoId || i.browseId || i.id,
-        type,
-        title: i.name || i.title || "Sin título",
-        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: i.album?.name || null,
-        duration: i.duration?.text || null,
-        thumbnail: hdThumb?.url?.replace(/w\\d+-h\\d+/, "w1080-h1080") || null
-      };
-    });
-
-    res.json(results);
+    res.json(songs);
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({ error: "Error buscando canciones" });
-  }
-});
-
-// Endpoint de audio con streaming directo
-app.get("/audio/:id", requireYT, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const info = await yt.getInfo(id);
-
-    if (info.playability_status?.status === "LOGIN_REQUIRED") {
-      return res.status(403).json({ error: "Este contenido requiere inicio de sesión en YouTube Music" });
-    }
-
-    const stream = await info.download({
-      type: "audio",
-      quality: "best"
-    });
-
-    const mime = stream.mime_type || "audio/webm";
-    res.setHeader("Content-Type", mime);
-    res.setHeader("Accept-Ranges", "bytes");
-
-    stream.pipe(res);
-
-  } catch (err) {
-    console.error("🔥 AUDIO ERROR REAL:", err);
-    res.status(500).json({
-      error: "No se pudo reproducir el audio",
-      detail: err.message
-    });
   }
 });
 
@@ -109,5 +70,6 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
 
 
