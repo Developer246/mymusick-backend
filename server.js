@@ -31,7 +31,6 @@ app.get("/search", requireYT, async (req, res) => {
 
     const search = await yt.music.search(q, { type: "song" });
 
-    // Busca la sección que contiene canciones
     const section = search.contents?.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
@@ -60,17 +59,13 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     const id = req.params.id;
     const info = await yt.music.getInfo(id);
 
-  app.get("/audio/:id", requireYT, async (req, res) => {
-  try {
-    const id = req.params.id;
-    const info = await yt.music.getInfo(id);
-
-    // Busca primero en adaptive_formats
-    const audioFormat = info.streaming_data?.adaptive_formats
-      ?.filter(f => f.mime_type.includes("audio"))
-      ?.sort((a, b) => b.bitrate - a.bitrate)[0];
+    // Busca en adaptive_formats primero, luego en formats
+    const audioFormat =
+      info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
+      info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
 
     if (!audioFormat) {
+      console.log("Streaming data:", JSON.stringify(info.streaming_data, null, 2));
       return res.status(404).json({ error: "No se encontró audio" });
     }
 
@@ -81,10 +76,10 @@ app.get("/audio/:id", requireYT, async (req, res) => {
   }
 });
 
-
 // Arranca el servidor
 app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
 
