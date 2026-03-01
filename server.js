@@ -11,7 +11,8 @@ let yt;
 
 // Inicializa YouTube Music
 async function initYT() {
-  yt = await Innertube.create({ client_type: "ANDROID_MUSIC" }); // más confiable para streams
+  // ANDROID_MUSIC suele devolver mejor los streams
+  yt = await Innertube.create({ client_type: "ANDROID_MUSIC" });
   console.log("YouTube Music inicializado 🎵");
 }
 
@@ -66,7 +67,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
       info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
 
     if (!audioFormat) {
-      console.log("Streaming data vacío:", JSON.stringify(info.streaming_data, null, 2));
+      console.log("Streaming data:", JSON.stringify(info.streaming_data, null, 2));
       return res.status(404).json({ error: "No se encontró audio" });
     }
 
@@ -82,3 +83,4 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
