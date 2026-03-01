@@ -60,7 +60,12 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     const id = req.params.id;
     const info = await yt.music.getInfo(id);
 
-    // Busca formatos de audio en adaptive_formats (más común)
+  app.get("/audio/:id", requireYT, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const info = await yt.music.getInfo(id);
+
+    // Busca primero en adaptive_formats
     const audioFormat = info.streaming_data?.adaptive_formats
       ?.filter(f => f.mime_type.includes("audio"))
       ?.sort((a, b) => b.bitrate - a.bitrate)[0];
@@ -75,6 +80,7 @@ app.get("/audio/:id", requireYT, async (req, res) => {
     res.status(500).json({ error: "Error obteniendo audio" });
   }
 });
+
 
 // Arranca el servidor
 app.listen(PORT, async () => {
