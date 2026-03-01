@@ -16,34 +16,40 @@ async function initYT() {
   console.log("YouTube Music inicializado 🎵");
 }
 
-app.get("/search", async (req, res) => {
+app.get("/search", requireYT, async (req, res) => {
   try {
-    if (!yt) {
-      return res.status(503).json({ error: "YouTube Music no está inicializado" });
-    }
+    const q = req.query.q?.trim();
+    if (!q) return res.json([]);
 
-    const query = req.query.q;
-    if (!query) {
-      return res.status(400).json({ error: "Falta parámetro q" });
-    }
+    const search = await yt.music.search(q, { type: "song" });
 
-    const results = await yt.music.search(query, { type: "song" });
-    console.log("Resultados crudos:", JSON.stringify(results, null, 2));
+    const section = search.contents?.find(s =>
+      Array.isArray(s?.contents)
+    );
 
-    // En v16 los resultados están en results.items
-    const songs = results.items?.map(item => ({
-      id: item.id,
-      title: item.title?.text || "",
-      artist: item.artists?.map(a => a.name).join(", ") || "",
-      duration: item.duration?.text || "",
-      thumbnail: item.thumbnails?.[0]?.url || ""
-    })) || [];
+    if (!section) return res.json([]);
+
+    const songs = section.contents
+      .filter(i => i?.id)
+      .slice(0, 10)
+      .map(i => ({
+        id: i.id,
+        title: i.name || i.title || "Sin título",
+        artist:
+          i.artists?.map(a => a.name).join(", ") ||
+          "Desconocido",
+        album: i.album?.name || null,
+        duration: i.duration?.text || null,
+        thumbnail: i.thumbnails
+          ?.at(-1)
+          ?.url
+          ?.replace(/w\d+-h\d+/, "w544-h544")
+      }));
 
     res.json(songs);
-
-  } catch (error) {
-    console.error("Error en /search:", error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("Search error:", err);
+    res.status(500).json({ error: "Error buscando canciones" });
   }
 });
 
