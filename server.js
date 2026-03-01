@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const fs = require("fs");
 const { Innertube } = require("youtubei.js");
 
 const app = express();
@@ -10,17 +9,13 @@ const PORT = process.env.PORT || 3000;
 
 let yt;
 
-// Inicializa YouTube Music con cookies
+// Inicializa YouTube Music con cookies desde variable de entorno
 async function initYT() {
-  // Lee cookies desde un archivo cookies.json
-  // cookies.json debe tener: { "cookie": "VISITOR_INFO1_LIVE=...; YSC=...; PREF=...; AUTH=..." }
-  const cookies = JSON.parse(fs.readFileSync("./cookies.json", "utf8"));
-
+  const cookie = process.env.YTM_COOKIE; // lee la cookie desde Render
   yt = await Innertube.create({
     client_type: "ANDROID_MUSIC", // más confiable para streams
-    cookie: cookies.cookie
+    cookie
   });
-
   console.log("YouTube Music inicializado con cookies 🎵");
 }
 
