@@ -50,7 +50,7 @@ app.get("/search", requireYT, async (req, res) => {
         }, null);
 
         return {
-          id: i.videoId || i.id, // usar videoId si existe
+          id: i.videoId ,// usar videoId si existe
           title: i.name || i.title || "Sin título",
           artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
           album: i.album?.name || null,
