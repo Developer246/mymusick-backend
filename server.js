@@ -11,7 +11,7 @@ let yt;
 
 // Inicializa YouTube Music
 async function initYT() {
-  yt = await Innertube.create({ client_type: "ANDROID_MUSIC" });
+  yt = await Innertube.create({ client_type: "WEB" });
   console.log("YouTube Music inicializado 🎵");
 }
 
