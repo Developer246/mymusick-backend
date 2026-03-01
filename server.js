@@ -39,7 +39,7 @@ app.get("/search", requireYT, async (req, res) => {
     if (!section) return res.json([]);
 
     const songs = section.contents
-      .filter(i => i?.videoId || i?.id)
+      .filter(i => i?.videoId)
       .slice(0, 10)
       .map(i => {
         // Selecciona la miniatura más grande disponible
