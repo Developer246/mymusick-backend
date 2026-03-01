@@ -11,7 +11,7 @@ let yt;
 
 // Inicializa YouTube Music
 async function initYT() {
-  yt = await Innertube.create({ client_type: "WEB_REMIX" });
+  yt = await Innertube.create({ client_type: "ANDROID_MUSIC" }); // más confiable para streams
   console.log("YouTube Music inicializado 🎵");
 }
 
@@ -31,6 +31,7 @@ app.get("/search", requireYT, async (req, res) => {
 
     const search = await yt.music.search(q, { type: "song" });
 
+    // Busca la sección que contiene canciones
     const section = search.contents?.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
@@ -48,7 +49,7 @@ app.get("/search", requireYT, async (req, res) => {
 
     res.json(songs);
   } catch (err) {
-    console.error("Search error:", err.message);
+    console.error("Search error:", err);
     res.status(500).json({ error: "Error buscando canciones" });
   }
 });
@@ -65,13 +66,13 @@ app.get("/audio/:id", requireYT, async (req, res) => {
       info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
 
     if (!audioFormat) {
-      console.log("Streaming data:", JSON.stringify(info.streaming_data, null, 2));
+      console.log("Streaming data vacío:", JSON.stringify(info.streaming_data, null, 2));
       return res.status(404).json({ error: "No se encontró audio" });
     }
 
     res.json({ url: audioFormat.url });
   } catch (error) {
-    console.error("Audio error:", error.message);
+    console.error("Audio error:", error);
     res.status(500).json({ error: "Error obteniendo audio" });
   }
 });
@@ -81,5 +82,3 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
-
-
