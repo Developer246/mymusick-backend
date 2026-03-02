@@ -4,81 +4,145 @@ const { Innertube } = require("youtubei.js");
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-let yt;
+let yt = null;
+let isInitializing = false;
 
-// Inicializa YouTube Music
-async function initYT() {
-  yt = await Innertube.create({
-    client_type: "ANDROID_MUSIC"
-  });
-  console.log("YouTube Music inicializado sin cookies 🎵");
+// Cache simple en memoria
+const cache = new Map();
+const CACHE_TTL = 1000 * 60 * 10; // 10 minutos
+
+/* ==============================
+   INICIALIZACIÓN SEGURA
+============================== */
+async function initYT(retries = 3) {
+  if (isInitializing) return;
+  isInitializing = true;
+
+  for (let i = 1; i <= retries; i++) {
+    try {
+      yt = await Innertube.create({
+        client_type: "ANDROID_MUSIC"
+      });
+
+      console.log("🎵 YouTube Music inicializado");
+      isInitializing = false;
+      return;
+    } catch (err) {
+      console.error(`⚠ Intento ${i} fallido`, err.message);
+      if (i === retries) {
+        console.error("❌ No se pudo inicializar YouTube Music");
+        process.exit(1);
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  }
 }
 
-// Middleware para asegurar que yt esté listo
+/* ==============================
+   MIDDLEWARE
+============================== */
 function requireYT(req, res, next) {
   if (!yt) {
-    return res.status(503).json({ error: "YouTube Music no está inicializado" });
+    return res.status(503).json({
+      error: "Servicio no disponible",
+      message: "YouTube Music no está listo"
+    });
   }
   next();
 }
 
-// Función para mapear cada canción
+/* ==============================
+   MAPEO DE CANCIONES
+============================== */
 function mapSong(i) {
   const hdThumb = i.thumbnails?.reduce((best, thumb) => {
-    const currentSize = (thumb.width || 0) * (thumb.height || 0);
+    const size = (thumb.width || 0) * (thumb.height || 0);
     const bestSize = (best?.width || 0) * (best?.height || 0);
-    return currentSize > bestSize ? thumb : best;
+    return size > bestSize ? thumb : best;
   }, null);
 
   return {
     id: i.videoId,
-    type: "song",
     title: i.name || i.title || "Sin título",
     artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
     album: i.album?.name || null,
     duration: i.duration?.text || null,
-    thumbnail: hdThumb?.url?.replace(/w\\d+-h\\d+/, "w1080-h1080") || null
+    thumbnail:
+      hdThumb?.url?.replace(/w\d+-h\d+/, "w1080-h1080") || null
   };
 }
 
-// Endpoint de búsqueda (solo canciones, mínimo 8, máximo 10)
+/* ==============================
+   SEARCH ENDPOINT (OPTIMIZADO)
+============================== */
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q, { type: "song" });
-    const section = search.contents?.find(s => Array.isArray(s?.contents));
-    if (!section) return res.json([]);
-
-    // Filtrar solo canciones con videoId
-    let songs = section.contents.filter(i => i?.videoId);
-
-    // Ajustar cantidad: mínimo 8, máximo 10
-    if (songs.length === 0) {
-      return res.json([]); // vacío si no hay canciones
-    }
-    if (songs.length < 8) {
-      return res.json(songs.map(mapSong)); // devuelve lo que haya si son menos de 8
-    }
-    if (songs.length > 10) {
-      songs = songs.slice(0, 10); // corta a 10 si hay más
+    // Revisar cache
+    const cached = cache.get(q);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return res.json(cached.data);
     }
 
-    res.json(songs.map(mapSong));
+    const search = await yt.music.search(q, {
+      type: "song",
+      limit: 50
+    });
+
+    let songs = [];
+
+    if (Array.isArray(search.contents)) {
+      songs = search.contents.filter(i => i?.videoId);
+    } else if (Array.isArray(search.sections)) {
+      for (const section of search.sections) {
+        if (Array.isArray(section.contents)) {
+          songs.push(...section.contents.filter(i => i?.videoId));
+        }
+      }
+    }
+
+    const mapped = songs.map(mapSong);
+
+    // Guardar en cache
+    cache.set(q, {
+      data: mapped,
+      timestamp: Date.now()
+    });
+
+    res.json(mapped);
+
   } catch (err) {
-    console.error("Search error:", err);
-    res.status(500).json({ error: "Error buscando canciones" });
+    console.error("❌ Search error:", err);
+    res.status(500).json({
+      error: "Error buscando canciones",
+      details: err.message
+    });
   }
 });
 
-// 🚀 Arranca el servidor
+/* ==============================
+   HEALTH CHECK
+============================== */
+app.get("/health", (req, res) => {
+  res.json({
+    status: yt ? "OK" : "NOT_READY",
+    uptime: process.uptime(),
+    cacheSize: cache.size
+  });
+});
+
+/* ==============================
+   START SERVER
+============================== */
 app.listen(PORT, async () => {
   await initYT();
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 });
 
 
