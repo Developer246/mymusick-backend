@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
-const fetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
@@ -65,9 +64,7 @@ app.get("/search", requireYT, async (req, res) => {
 =============================== */
 app.get("/stream/:id", requireYT, async (req, res) => {
   try {
-    const videoId = req.params.id;
-
-    const info = await yt.getInfo(videoId);
+    const info = await yt.getInfo(req.params.id);
     const formats = info.streaming_data?.adaptive_formats || [];
 
     const audio = formats
