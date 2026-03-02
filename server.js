@@ -68,7 +68,6 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     const videoId = req.params.id;
 
     const info = await yt.getInfo(videoId);
-
     const formats = info.streaming_data?.adaptive_formats || [];
 
     const audio = formats
@@ -84,7 +83,11 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
 
-    response.body.pipe(res);
+    for await (const chunk of response.body) {
+      res.write(chunk);
+    }
+
+    res.end();
 
   } catch (err) {
     console.error("Stream error:", err);
