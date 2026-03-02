@@ -36,37 +36,54 @@ function requireYT(req, res, next) {
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q) return res.json([]);
+    if (!q) {
+      return res.json([]);
+    }
 
-    const search = await yt.music.search(q);
+    const search = await yt.music.search(q, { type: "song" });
 
-    // Aplanamos todas las secciones
-    const allItems =
-      search.contents?.flatMap(section => section.contents || []) || [];
+    const section = search.contents?.find(section =>
+      Array.isArray(section?.contents)
+    );
 
-    // Filtramos solo canciones reproducibles
-    const songs = allItems
-      .filter(item =>
-        item.videoId &&           // tiene videoId real
-        item.duration?.text       // tiene duración
-      )
+    if (!section) {
+      return res.json([]);
+    }
+
+    const songs = section.contents
+      .filter(item => item?.videoId || item?.id)
       .slice(0, 10)
-      .map(item => ({
-        id: item.videoId,
-        title: item.name || item.title || "Sin título",
-        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        duration: item.duration.text,
-        thumbnail: item.thumbnails?.at(-1)?.url || null
-      }));
+      .map(item => {
+        const hdThumb = getBestThumbnail(item.thumbnails);
+
+        return {
+          id: item.videoId || item.id,
+          title: item.name || item.title || "Sin título",
+          artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+          album: item.album?.name || null,
+          duration: item.duration?.text || null,
+          thumbnail: hdThumb
+            ? hdThumb.url.replace(/w\d+-h\d+/, "w1080-h1080")
+            : null
+        };
+      });
 
     res.json(songs);
 
   } catch (err) {
     console.error("Search error:", err);
-    res.status(500).json({ error: "Error en búsqueda" });
+    res.status(500).json({
+      error: "Error buscando canciones"
+    });
   }
 });
-
+function getBestThumbnail(thumbnails = []) {
+  return thumbnails.reduce((best, thumb) => {
+    const currentSize = (thumb.width || 0) * (thumb.height || 0);
+    const bestSize = (best?.width || 0) * (best?.height || 0);
+    return currentSize > bestSize ? thumb : best;
+  }, null);
+}
 /* ===============================
    🎧 STREAM PROXY
 =============================== */
