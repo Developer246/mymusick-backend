@@ -31,27 +31,35 @@ function requireYT(req, res, next) {
 }
 
 /* ===============================
-   🔎 SEARCH - SOLO SONG
+   🔎 SEARCH - SOLO CANCIONES REALES
 =============================== */
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q, { type: "song" });
+    const search = await yt.music.search(q);
 
-    const results = (search.contents || [])
-      .filter(i => i.id && i.duration?.text)
+    // Aplanamos todas las secciones
+    const allItems =
+      search.contents?.flatMap(section => section.contents || []) || [];
+
+    // Filtramos solo canciones reproducibles
+    const songs = allItems
+      .filter(item =>
+        item.videoId &&           // tiene videoId real
+        item.duration?.text       // tiene duración
+      )
       .slice(0, 10)
-      .map(i => ({
-        id: i.id,
-        title: i.name || i.title || "Sin título",
-        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-        duration: i.duration.text,
-        thumbnail: i.thumbnails?.at(-1)?.url || null
+      .map(item => ({
+        id: item.videoId,
+        title: item.name || item.title || "Sin título",
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        duration: item.duration.text,
+        thumbnail: item.thumbnails?.at(-1)?.url || null
       }));
 
-    res.json(results);
+    res.json(songs);
 
   } catch (err) {
     console.error("Search error:", err);
