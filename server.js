@@ -9,60 +9,110 @@ const PORT = process.env.PORT || 3000;
 
 let yt;
 
-/* =========================
-   INIT YT MUSIC
-========================= */
+/* ===============================
+   Inicialización simple
+=============================== */
 async function initYT() {
   yt = await Innertube.create({
     client_type: "ANDROID_MUSIC"
   });
 
-  console.log("🎵 YTMusic iniciado");
+  console.log("YouTube Music inicializado 🎵");
 }
 
-/* =========================
-   SEARCH YTMUSIC
-========================= */
-app.get("/search", async (req, res) => {
-  try {
-    if (!yt) await initYT();
+/* ===============================
+   Middleware
+=============================== */
+function requireYT(req, res, next) {
+  if (!yt) {
+    return res.status(503).json({ error: "YT no inicializado" });
+  }
+  next();
+}
 
+/* ===============================
+   🔎 SEARCH
+=============================== */
+app.get("/search", requireYT, async (req, res) => {
+  try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q, {
-      type: "song",
-      limit: 25
-    });
+    const search = await yt.music.search(q);
 
-    if (!search?.contents) return res.json([]);
+    const resultsRaw =
+      search.contents?.flatMap(section => section.contents || []) || [];
 
-    const songs = search.contents
-      .filter(item => item.videoId && item.type === "MusicResponsiveListItem")
-      .map(item => ({
-        id: item.videoId,
-        type: "song",
-        title: item.title?.text || "Sin título",
-        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: item.album?.name || null,
-        duration: item.duration?.text || null,
-        thumbnail: item.thumbnails?.at(-1)?.url || null
-      }));
+    const results = resultsRaw.slice(0, 10).map(i => ({
+      id: i.id,
+      title: i.name || i.title || "Sin título",
+      artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+      duration: i.duration?.text || null,
+      thumbnail: i.thumbnails?.at(-1)?.url || null
+    }));
 
-    res.json(songs);
-
+    res.json(results);
   } catch (err) {
-    console.error("❌ YTMusic error:", err.message);
-    yt = null; // reinicia si falla
-    res.status(500).json({ error: "Error en YTMusic" });
+    console.error("Search error:", err);
+    res.status(500).json({ error: "Error en búsqueda" });
   }
 });
 
-/* =========================
-   START
-========================= */
-app.listen(PORT, async () => {
-  await initYT();
-  console.log(`🚀 Servidor YTMusic en puerto ${PORT}`);
+/* ===============================
+   🎵 ALBUM
+=============================== */
+app.get("/album/:id", requireYT, async (req, res) => {
+  try {
+    const album = await yt.music.getAlbum(req.params.id);
+
+    const tracks = (album.contents || []).map(track => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artists?.map(a => a.name).join(", "),
+      duration: track.duration?.text,
+      thumbnail: track.thumbnails?.at(-1)?.url || null
+    }));
+
+    res.json(tracks);
+  } catch (err) {
+    console.error("Album error:", err);
+    res.status(500).json({ error: "No se pudo obtener el álbum" });
+  }
 });
 
+/* ===============================
+   📃 PLAYLIST
+=============================== */
+app.get("/playlist/:id", requireYT, async (req, res) => {
+  try {
+    const playlist = await yt.music.getPlaylist(req.params.id);
+
+    const tracks = (playlist.contents || []).map(track => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artists?.map(a => a.name).join(", "),
+      duration: track.duration?.text,
+      thumbnail: track.thumbnails?.at(-1)?.url || null
+    }));
+
+    res.json(tracks);
+  } catch (err) {
+    console.error("Playlist error:", err);
+    res.status(500).json({ error: "No se pudo obtener la playlist" });
+  }
+});
+
+/* ===============================
+   🚀 START
+=============================== */
+(async () => {
+  try {
+    await initYT();
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
+    });
+  } catch (err) {
+    console.error("Error inicializando YT:", err);
+    process.exit(1);
+  }
+})();
