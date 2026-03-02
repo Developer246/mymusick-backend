@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(cors());
@@ -10,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 let yt;
 
 /* ===============================
-   Inicialización simple
+   Inicialización
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
@@ -31,27 +32,28 @@ function requireYT(req, res, next) {
 }
 
 /* ===============================
-   🔎 SEARCH
+   🔎 SEARCH - SOLO SONG
 =============================== */
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search = await yt.music.search(q);
+    const search = await yt.music.search(q, { type: "song" });
 
-    const resultsRaw =
-      search.contents?.flatMap(section => section.contents || []) || [];
-
-    const results = resultsRaw.slice(0, 10).map(i => ({
-      id: i.id,
-      title: i.name || i.title || "Sin título",
-      artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-      duration: i.duration?.text || null,
-      thumbnail: i.thumbnails?.at(-1)?.url || null
-    }));
+    const results = (search.contents || [])
+      .filter(i => i.id && i.duration?.text)
+      .slice(0, 10)
+      .map(i => ({
+        id: i.id,
+        title: i.name || i.title || "Sin título",
+        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+        duration: i.duration.text,
+        thumbnail: i.thumbnails?.at(-1)?.url || null
+      }));
 
     res.json(results);
+
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({ error: "Error en búsqueda" });
@@ -59,46 +61,34 @@ app.get("/search", requireYT, async (req, res) => {
 });
 
 /* ===============================
-   🎵 ALBUM
+   🎧 STREAM PROXY
 =============================== */
-app.get("/album/:id", requireYT, async (req, res) => {
+app.get("/stream/:id", requireYT, async (req, res) => {
   try {
-    const album = await yt.music.getAlbum(req.params.id);
+    const videoId = req.params.id;
 
-    const tracks = (album.contents || []).map(track => ({
-      id: track.id,
-      title: track.title,
-      artist: track.artists?.map(a => a.name).join(", "),
-      duration: track.duration?.text,
-      thumbnail: track.thumbnails?.at(-1)?.url || null
-    }));
+    const info = await yt.getInfo(videoId);
 
-    res.json(tracks);
+    const formats = info.streaming_data?.adaptive_formats || [];
+
+    const audio = formats
+      .filter(f => f.mime_type?.includes("audio"))
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+    if (!audio?.url) {
+      return res.status(404).json({ error: "Audio no disponible" });
+    }
+
+    const response = await fetch(audio.url);
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+
+    response.body.pipe(res);
+
   } catch (err) {
-    console.error("Album error:", err);
-    res.status(500).json({ error: "No se pudo obtener el álbum" });
-  }
-});
-
-/* ===============================
-   📃 PLAYLIST
-=============================== */
-app.get("/playlist/:id", requireYT, async (req, res) => {
-  try {
-    const playlist = await yt.music.getPlaylist(req.params.id);
-
-    const tracks = (playlist.contents || []).map(track => ({
-      id: track.id,
-      title: track.title,
-      artist: track.artists?.map(a => a.name).join(", "),
-      duration: track.duration?.text,
-      thumbnail: track.thumbnails?.at(-1)?.url || null
-    }));
-
-    res.json(tracks);
-  } catch (err) {
-    console.error("Playlist error:", err);
-    res.status(500).json({ error: "No se pudo obtener la playlist" });
+    console.error("Stream error:", err);
+    res.status(500).json({ error: "Error obteniendo audio" });
   }
 });
 
