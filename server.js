@@ -84,45 +84,31 @@ app.get("/search", requireYT, async (req, res) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    // Revisar cache
-    const cached = cache.get(q);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return res.json(cached.data);
-    }
-
-    const search = await yt.music.search(q, {
-      type: "song",
-      limit: 50
-    });
+    const search = await yt.music.search(q);
 
     let songs = [];
 
-    if (Array.isArray(search.contents)) {
-      songs = search.contents.filter(i => i?.videoId);
-    } else if (Array.isArray(search.sections)) {
-      for (const section of search.sections) {
-        if (Array.isArray(section.contents)) {
-          songs.push(...section.contents.filter(i => i?.videoId));
-        }
+    // Extraer TODO lo que tenga videoId
+    const extractSongs = (obj) => {
+      if (!obj) return;
+
+      if (Array.isArray(obj)) {
+        obj.forEach(extractSongs);
+      } else if (typeof obj === "object") {
+        if (obj.videoId) songs.push(obj);
+        Object.values(obj).forEach(extractSongs);
       }
-    }
+    };
 
-    const mapped = songs.map(mapSong);
+    extractSongs(search);
 
-    // Guardar en cache
-    cache.set(q, {
-      data: mapped,
-      timestamp: Date.now()
-    });
+    const unique = [...new Map(songs.map(s => [s.videoId, s])).values()];
 
-    res.json(mapped);
+    res.json(unique.map(mapSong));
 
   } catch (err) {
-    console.error("❌ Search error:", err);
-    res.status(500).json({
-      error: "Error buscando canciones",
-      details: err.message
-    });
+    console.error("Search error:", err);
+    res.status(500).json({ error: "Error buscando canciones" });
   }
 });
 
