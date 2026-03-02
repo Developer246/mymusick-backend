@@ -105,15 +105,21 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
 
-    for await (const chunk of response.body) {
-      res.write(chunk);
-    }
-
-    res.end();
+    // 🔥 CLAVE: usar pipe correctamente
+    response.body.pipeTo(
+      new WritableStream({
+        write(chunk) {
+          res.write(chunk);
+        },
+        close() {
+          res.end();
+        }
+      })
+    );
 
   } catch (err) {
-    console.error("Stream error:", err);
-    res.status(500).json({ error: "Error obteniendo audio" });
+    console.error("Stream error REAL:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
