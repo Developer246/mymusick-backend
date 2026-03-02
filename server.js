@@ -9,14 +9,12 @@ const PORT = process.env.PORT || 3000;
 
 let yt;
 
-// Inicializa YouTube Music con cookies desde variable de entorno
+// Inicializa YouTube Music
 async function initYT() {
-  const cookie = process.env.YTM_COOKIE;
   yt = await Innertube.create({
-    client_type: "ANDROID_MUSIC",
-    cookie
+    client_type: "ANDROID_MUSIC"
   });
-  console.log("YouTube Music inicializado con cookies 🎵");
+  console.log("YouTube Music inicializado sin cookies 🎵");
 }
 
 // Middleware para asegurar que yt esté listo
@@ -46,7 +44,7 @@ function mapSong(i) {
   };
 }
 
-// Endpoint de búsqueda (solo canciones)
+// Endpoint de búsqueda (solo canciones, mínimo 8, máximo 10)
 app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -60,6 +58,9 @@ app.get("/search", requireYT, async (req, res) => {
     let songs = section.contents.filter(i => i?.videoId);
 
     // Ajustar cantidad: mínimo 8, máximo 10
+    if (songs.length === 0) {
+      return res.json([]); // vacío si no hay canciones
+    }
     if (songs.length < 8) {
       return res.json(songs.map(mapSong)); // devuelve lo que haya si son menos de 8
     }
@@ -79,4 +80,5 @@ app.listen(PORT, async () => {
   await initYT();
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
 
