@@ -14,7 +14,7 @@ let yt;
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
-    client_type: "WEB"
+    client_type: "ANDROID"   // ⚡ Cambiado a ANDROID para mayor compatibilidad
   });
 
   console.log("YouTube Music inicializado 🎵");
@@ -92,7 +92,12 @@ function getBestThumbnail(thumbnails = []) {
 app.get("/stream/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
-    const formats = info.streaming_data?.adaptive_formats || [];
+
+    // Buscar en adaptive_formats y formats
+    const formats = [
+      ...(info.streaming_data?.adaptive_formats || []),
+      ...(info.streaming_data?.formats || [])
+    ];
 
     const audio = formats
       .filter(f => f.mime_type?.includes("audio"))
@@ -108,11 +113,9 @@ app.get("/stream/:id", requireYT, async (req, res) => {
       return res.status(500).json({ error: "No se pudo obtener el audio" });
     }
 
-    // Usa el mime_type real si está disponible
     res.setHeader("Content-Type", audio.mime_type || "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
 
-    // Pipe directo de Web Stream a Node.js response
     response.body.on("data", chunk => res.write(chunk));
     response.body.on("end", () => res.end());
     response.body.on("error", err => {
