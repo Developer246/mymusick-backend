@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
-const fetch = require("node-fetch"); // asegúrate de tenerlo instalado
 
 const app = express();
 app.use(cors());
