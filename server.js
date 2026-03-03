@@ -14,7 +14,7 @@ let yt;
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
-    client_type: "ANDROID"   // ⚡ Cambiado a ANDROID para mayor compatibilidad
+    client_type: "ANDROID"   // ⚡ Usamos ANDROID para mayor compatibilidad
   });
 
   console.log("YouTube Music inicializado 🎵");
@@ -63,7 +63,7 @@ app.get("/search", requireYT, async (req, res) => {
           album: item.album?.name || null,
           duration: item.duration?.text || null,
           thumbnail: hdThumb
-            ? hdThumb.url.replace(/w\d+-h\d+/, "w1080-h1080")
+            ? hdThumb.url.replace(/w\\d+-h\\d+/, "w1080-h1080")
             : null
         };
       });
@@ -73,7 +73,8 @@ app.get("/search", requireYT, async (req, res) => {
   } catch (err) {
     console.error("Search error:", err);
     res.status(500).json({
-      error: "Error buscando canciones"
+      error: "Error buscando canciones",
+      message: err.message
     });
   }
 });
@@ -89,19 +90,33 @@ function getBestThumbnail(thumbnails = []) {
 /* ===============================
    🎧 STREAM PROXY
 =============================== */
+function parseCipher(cipher) {
+  const params = new URLSearchParams(cipher);
+  return `${params.get("url")}&${params.get("sp")}=${params.get("sig")}`;
+}
+
 app.get("/stream/:id", requireYT, async (req, res) => {
   try {
     const info = await yt.getInfo(req.params.id);
 
-    // Buscar en adaptive_formats y formats
     const formats = [
       ...(info.streaming_data?.adaptive_formats || []),
       ...(info.streaming_data?.formats || [])
     ];
 
-    const audio = formats
+    let audio = formats
       .filter(f => f.mime_type?.includes("audio"))
       .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+    // Manejar signatureCipher si no hay url directo
+    if (!audio?.url && audio?.signatureCipher) {
+      try {
+        audio.url = parseCipher(audio.signatureCipher);
+      } catch (err) {
+        console.error("Cipher parse error:", err);
+        return res.status(500).json({ error: "No se pudo decodificar el audio", message: err.message });
+      }
+    }
 
     if (!audio?.url) {
       return res.status(404).json({ error: "Audio no disponible" });
@@ -120,12 +135,12 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     response.body.on("end", () => res.end());
     response.body.on("error", err => {
       console.error("Stream error:", err);
-      res.status(500).end();
+      res.status(500).json({ error: "Error en el stream", message: err.message });
     });
 
   } catch (err) {
     console.error("Stream error REAL:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Error procesando stream", message: err.message });
   }
 });
 
