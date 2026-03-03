@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
+const fetch = require("node-fetch"); // asegúrate de tenerlo instalado
 
 const app = express();
 app.use(cors());
@@ -77,6 +78,7 @@ app.get("/search", requireYT, async (req, res) => {
     });
   }
 });
+
 function getBestThumbnail(thumbnails = []) {
   return thumbnails.reduce((best, thumb) => {
     const currentSize = (thumb.width || 0) * (thumb.height || 0);
@@ -84,6 +86,7 @@ function getBestThumbnail(thumbnails = []) {
     return currentSize > bestSize ? thumb : best;
   }, null);
 }
+
 /* ===============================
    🎧 STREAM PROXY
 =============================== */
@@ -102,20 +105,21 @@ app.get("/stream/:id", requireYT, async (req, res) => {
 
     const response = await fetch(audio.url);
 
-    res.setHeader("Content-Type", "audio/mpeg");
+    if (!response.body) {
+      return res.status(500).json({ error: "No se pudo obtener el audio" });
+    }
+
+    // Usa el mime_type real si está disponible
+    res.setHeader("Content-Type", audio.mime_type || "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
 
-    // 🔥 CLAVE: usar pipe correctamente
-    response.body.pipeTo(
-      new WritableStream({
-        write(chunk) {
-          res.write(chunk);
-        },
-        close() {
-          res.end();
-        }
-      })
-    );
+    // Pipe directo de Web Stream a Node.js response
+    response.body.on("data", chunk => res.write(chunk));
+    response.body.on("end", () => res.end());
+    response.body.on("error", err => {
+      console.error("Stream error:", err);
+      res.status(500).end();
+    });
 
   } catch (err) {
     console.error("Stream error REAL:", err);
