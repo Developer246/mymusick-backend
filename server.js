@@ -14,7 +14,7 @@ let yt;
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
-    client_type: "ANDROID"   // ⚡ Usamos ANDROID para mayor compatibilidad
+    client_type: "WEB_REMIX"   // para mayor compatibilidad
   });
 
   console.log("YouTube Music inicializado 🎵");
