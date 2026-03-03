@@ -14,7 +14,7 @@ let yt;
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
-    client_type: "WEB_REMIX"   // para mayor compatibilidad
+    client_type: "WEB_REMIX"   // cliente más estable para YouTube Music
   });
 
   console.log("YouTube Music inicializado 🎵");
@@ -97,7 +97,8 @@ function parseCipher(cipher) {
 
 app.get("/stream/:id", requireYT, async (req, res) => {
   try {
-    const info = await yt.getInfo(req.params.id);
+    // ⚡ Usamos getBasicInfo en lugar de getInfo
+    const info = await yt.getBasicInfo(req.params.id);
 
     const formats = [
       ...(info.streaming_data?.adaptive_formats || []),
@@ -108,7 +109,6 @@ app.get("/stream/:id", requireYT, async (req, res) => {
       .filter(f => f.mime_type?.includes("audio"))
       .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
-    // Manejar signatureCipher si no hay url directo
     if (!audio?.url && audio?.signatureCipher) {
       try {
         audio.url = parseCipher(audio.signatureCipher);
@@ -140,7 +140,10 @@ app.get("/stream/:id", requireYT, async (req, res) => {
 
   } catch (err) {
     console.error("Stream error REAL:", err);
-    res.status(500).json({ error: "Error procesando stream", message: err.message });
+    res.status(500).json({
+      error: "Error procesando stream",
+      message: err.message
+    });
   }
 });
 
