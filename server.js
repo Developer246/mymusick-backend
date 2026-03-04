@@ -79,14 +79,6 @@ app.get("/search", requireYT, async (req, res) => {
   }
 });
 
-function getBestThumbnail(thumbnails = []) {
-  return thumbnails.reduce((best, thumb) => {
-    const currentSize = (thumb.width || 0) * (thumb.height || 0);
-    const bestSize = (best?.width || 0) * (best?.height || 0);
-    return currentSize > bestSize ? thumb : best;
-  }, null);
-}
-
 /* ===============================
    🎧 STREAM PROXY
 =============================== */
