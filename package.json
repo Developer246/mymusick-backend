@@ -9,12 +9,11 @@
     "dev": "nodemon server.js"
   },
  "dependencies": {
-  "youtubei.js": "^16.0.1",           // ya lo tienes
-  "@distube/ytdl-core": "^4.16.12",   // opcional como fallback temporal
+  "youtubei.js": "^16.0.1",           
+  "@distube/ytdl-core": "^4.16.12",   
   "cors": "^2.8.5",
-  "express": "^4.19.2",               // actualiza si hay 4.19.x
-  "express-rate-limit": "^7.4.0",     // o la última 7.x
-  // quita ytdl si migras completamente
+  "express": "^4.19.2",              
+  "express-rate-limit": "^7.4.0",     
 },
   "devDependencies": {
     "nodemon": "3.0.3"
