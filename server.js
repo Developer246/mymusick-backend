@@ -97,7 +97,6 @@ function parseCipher(cipher) {
 
 app.get("/stream/:id", requireYT, async (req, res) => {
   try {
-    // ⚡ Usamos getBasicInfo en lugar de getInfo
     const info = await yt.getBasicInfo(req.params.id);
 
     const formats = [
@@ -109,34 +108,35 @@ app.get("/stream/:id", requireYT, async (req, res) => {
       .filter(f => f.mime_type?.includes("audio"))
       .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
-    if (!audio?.url && audio?.signatureCipher) {
-      try {
-        audio.url = parseCipher(audio.signatureCipher);
-      } catch (err) {
-        console.error("Cipher parse error:", err);
-        return res.status(500).json({ error: "No se pudo decodificar el audio", message: err.message });
+    if (!audio) {
+      return res.status(404).json({ error: "No se encontró audio disponible" });
+    }
+
+    if (!audio.url && audio.signatureCipher) {
+      const params = new URLSearchParams(audio.signatureCipher);
+      const url = params.get("url");
+      const sp = params.get("sp");
+      const sig = params.get("sig");
+
+      if (url && sp && sig) {
+        audio.url = `${url}&${sp}=${sig}`;
       }
     }
 
-    if (!audio?.url) {
-      return res.status(404).json({ error: err.messaje });
+    if (!audio.url) {
+      return res.status(404).json({ error: "No se pudo obtener la URL del audio" });
     }
 
     const response = await fetch(audio.url);
 
-    if (!response.body) {
-      return res.status(500).json({ error: "No se pudo obtener el audio" });
+    if (!response.ok) {
+      return res.status(500).json({ error: "Error obteniendo el audio real" });
     }
 
     res.setHeader("Content-Type", audio.mime_type || "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
 
-    response.body.on("data", chunk => res.write(chunk));
-    response.body.on("end", () => res.end());
-    response.body.on("error", err => {
-      console.error("Stream error:", err);
-      res.status(500).json({ error: "Error en el stream", message: err.message });
-    });
+    response.body.pipe(res);
 
   } catch (err) {
     console.error("Stream error REAL:", err);
