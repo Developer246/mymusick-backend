@@ -2,11 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const path = require("path");
-
-const { Innertube } = require("youtubei.js");
-const ytdl = require("@distube/ytdl-core");
-
+const { Innertube, UniversalCache, ClientType } = require("youtubei.js"); // ← importante: importar ClientType
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -14,77 +12,85 @@ app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 
 /* ===============================
-   🔐 RATE LIMIT
+   🔐 RATE LIMIT (puedes subir un poco si usas proxy/CDN)
 =============================== */
 app.use(
   rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 150
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 200,                 // ← subí un poco, pero monitorea
+    standardHeaders: true,
+    legacyHeaders: false,
   })
 );
 
 /* ===============================
-   🧠 YT MUSIC CLIENT
+   🧠 YT CLIENT (más robusto en 2026)
 =============================== */
 let yt;
-
 async function initYT() {
   try {
     yt = await Innertube.create({
-      client_type: "WEB_REMIX"
+      // client_type ya no es string en versiones nuevas
+      // Puedes omitirlo (default WEB) o usar:
+      // retrieve_player: true,  // útil si luego quieres lyrics, related, etc.
+      cache: new UniversalCache(false), // o true si quieres caché en disco
+      // generate_session_locally: true, // a veces ayuda con rate-limits
     });
-    console.log("🎵 YouTube Music listo");
+    console.log("🎵 YouTube client inicializado OK");
   } catch (err) {
-    console.error("Error iniciando YouTubei:", err.message);
+    console.error("Error al iniciar youtubei.js:", err);
+    setTimeout(initYT, 10000); // retry automático después de 10s
   }
 }
 
 initYT();
 
 /* ===============================
-   🧠 CACHE SIMPLE
+   🧠 CACHE SIMPLE (mejor usar LRU si crece)
 =============================== */
 const searchCache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
+const CACHE_TTL = 8 * 60 * 1000; // subí a 8 min
 
 /* ===============================
-   🔎 SEARCH (YT MUSIC STYLE)
+   🔎 SEARCH (estilo YouTube Music 2026)
 =============================== */
 app.get("/search", async (req, res) => {
+  const q = req.query.q?.trim();
+  if (!q) return res.json([]);
+
+  const cached = searchCache.get(q);
+  if (cached && Date.now() - cached.time < CACHE_TTL) {
+    return res.json(cached.data);
+  }
+
+  if (!yt) return res.status(503).json({ error: "Cliente YT no listo" });
+
   try {
-    const q = req.query.q?.trim();
-    if (!q) return res.json([]);
+    // Forma moderna (2025–2026)
+    const search = await yt.search(q, {
+      // filter: "songs",          // ← antes era "type: song"
+      // limit: 10,
+      // client: "YTMUSIC"         // algunos lo requieren explícitamente
+    });
 
-    const cached = searchCache.get(q);
-    if (cached && Date.now() - cached.time < CACHE_TTL) {
-      return res.json(cached.data);
-    }
-
-    if (!yt) return res.status(503).json({ error: "YT no inicializado" });
-
-    const results = await yt.search(q, { type: "song" });
-
-    const songs = results.results
-      .slice(0, 10)
-      .map(item => ({
-        id: item.id,
-        title: item.title?.text || "Sin título",
-        artist: item.author?.name || "Desconocido",
-        duration: item.duration?.text || "0:00",
-        thumbnail: item.thumbnails?.[0]?.url || null
-      }));
+    const songs = search.songs?.slice(0, 10).map((item) => ({
+      id: item.id,
+      title: item.title?.text || item.title || "Sin título",
+      artist: item.author?.name || item.artists?.[0]?.name || "Desconocido",
+      duration: item.duration?.text || item.length || "0:00",
+      thumbnail: item.thumbnails?.[0]?.url || item.thumbnail?.url || null,
+    })) || [];
 
     searchCache.set(q, { data: songs, time: Date.now() });
-
     res.json(songs);
   } catch (err) {
     console.error("Search error:", err.message);
-    res.status(500).json({ error: "Error buscando canciones" });
+    res.status(500).json({ error: "Error en búsqueda", details: err.message });
   }
 });
 
 /* ===============================
-   🎧 STREAM AUDIO
+   🎧 STREAM AUDIO → ahora usando youtubei.js (MUCHO más estable)
 =============================== */
 function validateVideoId(id) {
   return /^[a-zA-Z0-9_-]{11}$/.test(id);
@@ -92,52 +98,52 @@ function validateVideoId(id) {
 
 app.get("/stream/:id", async (req, res) => {
   const videoId = req.params.id;
-
   if (!validateVideoId(videoId)) {
-    return res.status(400).json({ error: "ID inválido" });
+    return res.status(400).json({ error: "ID de video inválido" });
   }
 
+  if (!yt) return res.status(503).json({ error: "Cliente no listo" });
+
   try {
-    const info = await ytdl.getInfo(videoId);
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: "highestaudio",
-      filter: "audioonly"
+    const info = await yt.getBasicInfo(videoId);
+    const format = info.chooseFormat({
+      type: "audio",           // o "audioonly"
+      quality: "best",         // o "highest"
     });
 
     if (!format) {
-      return res.status(404).json({ error: "Formato no encontrado" });
+      return res.status(404).json({ error: "No se encontró formato de audio" });
     }
 
-    res.setHeader("Content-Type", format.mimeType);
+    res.setHeader("Content-Type", format.mime_type);
     res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Cache-Control", "no-cache, no-store");
 
-    const stream = ytdl(videoId, { format });
-
-    stream.on("error", err => {
-      console.error("Stream error:", err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Error en el stream" });
-      } else {
-        res.destroy();
-      }
-    });
-
+    // Streaming directo desde youtubei.js
+    const stream = await format.createStream();
     stream.pipe(res);
 
+    stream.on("error", (err) => {
+      console.error("Stream error:", err.message);
+      if (!res.headersSent) res.status(500).json({ error: "Error en stream" });
+      else res.destroy();
+    });
   } catch (err) {
     console.error("Stream fatal:", err.message);
-    res.status(500).json({ error: "Error procesando stream" });
+    const code = err.message.includes("403") ? 403 : 500;
+    res.status(code).json({ error: "No se pudo obtener el stream", details: err.message });
   }
 });
 
 /* ===============================
-   🏥 HEALTH CHECK
+   🏥 HEALTH CHECK + YT status
 =============================== */
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    ytReady: !!yt,
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -145,5 +151,5 @@ app.get("/health", (req, res) => {
    🚀 START
 =============================== */
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor en http://localhost:${PORT}`);
 });
