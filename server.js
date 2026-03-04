@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const ytdl = require("ytdl-core");
-const ytsr = require("ytsr"); // Necesario para la búsqueda
+const ytsr = require("ytsr");
 const rateLimit = require("express-rate-limit");
 
 const app = express();
@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 /* ===============================
    📦 CONFIGURACIÓN
 =============================== */
-const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutos (URLs expiran rápido)
 const urlCache = new Map();
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000;
@@ -44,19 +44,20 @@ app.get("/search", async (req, res) => {
 
     console.log(`🔍 Buscando: "${q}"`);
     
-    // Usamos ytsr para búsqueda ya que ytdl-core no tiene search
     const search = await ytsr(q, {
       limit: 10,
       filters: ["music_songs"]
     });
 
-    const songs = search.items.map(item => ({
-      id: item.id,
-      title: item.title,
-      artist: item.author.name,
-      duration: item.duration,
-      thumbnail: item.thumbnails?.[0]?.url || null
-    }));
+    const songs = search.items
+      .filter(item => item && item.id)
+      .map(item => ({
+        id: item.id,
+        title: item.title || "Sin título",
+        artist: item.author?.name || "Artista desconocido",
+        duration: item.duration || "0:00",
+        thumbnail: item.thumbnails?.[0]?.url || null
+      }));
 
     console.log(`✅ Search completado en ${Date.now() - startTime}ms`);
     res.json(songs);
@@ -84,7 +85,7 @@ app.get("/stream/:id", async (req, res) => {
   try {
     console.log(`🎵 Iniciando stream para video: ${videoId}`);
 
-    // 1. Verificar cache
+    // 1. Verificar cache (con TTL corto)
     const cached = urlCache.get(videoId);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       console.log(`📦 Usando URL en cache para ${videoId}`);
@@ -157,7 +158,6 @@ async function streamAudio(req, res, url, mimeType) {
   try {
     const range = req.headers.range;
     
-    // Headers básicos
     res.setHeader("Content-Type", mimeType || "audio/mpeg");
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
     res.setHeader("Pragma", "no-cache");
@@ -174,7 +174,6 @@ async function streamAudio(req, res, url, mimeType) {
       res.setHeader("Content-Length", size);
       res.status(206);
     } else {
-      // No establecer Content-Length: 0, dejar que el stream lo maneje
       res.setHeader("Accept-Ranges", "bytes");
       res.status(200);
     }
@@ -195,7 +194,6 @@ async function streamAudio(req, res, url, mimeType) {
       throw new Error(`HTTP Error: ${response.status} - ${response.statusText}`);
     }
 
-    // Manejo de stream compatible con Node.js y Express
     const reader = response.body.getReader();
     
     const pump = async () => {
@@ -216,7 +214,10 @@ async function streamAudio(req, res, url, mimeType) {
 
   } catch (err) {
     if (!res.headersSent) {
-      res.status(500).json({ error: "Error al conectar con el servidor de audio" });
+      res.status(500).json({ 
+        error: "Error al conectar con el servidor de audio",
+        message: err.message 
+      });
     } else {
       res.destroy();
     }
