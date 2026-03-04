@@ -13,6 +13,8 @@ const PORT = process.env.PORT || 3000;
 =============================== */
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const urlCache = new Map();
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000;
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -35,6 +37,207 @@ function validateVideoId(id) {
 app.get("/search", async (req, res) => {
   const startTime = Date.now();
   
+  try {
+    const q = req.query.q?.trim();
+    if (!q) return res.json([]);
+
+    console.log(`🔍 Buscando: "${q}"`);
+    
+    // ytdl-core search con mejor configuración
+    const search = await ytdl.search(q, {
+      filter: "music_songs",
+      lang: "es",
+      country: "US"
+    });
+
+    const songs = search
+      .slice(0, 10)
+      .map(item => ({
+        id: ytdl.getVideoID(item.url),
+        title: item.title,
+        artist: item.author.name,
+        duration: item.duration,
+        thumbnail: item.thumbnails?.[0]?.url || null
+      }));
+
+    console.log(`✅ Search completado en ${Date.now() - startTime}ms`);
+    res.json(songs);
+
+  } catch (err) {
+    console.error("❌ Search error:", err.message);
+    res.status(500).json({ 
+      error: "Error buscando canciones",
+      message: err.message 
+    });
+  }
+});
+
+/* ===============================
+   🎧 STREAM PROXY CON RETRY
+=============================== */
+app.get("/stream/:id", async (req, res) => {
+  const videoId = req.params.id;
+  const startTime = Date.now();
+
+  if (!validateVideoId(videoId)) {
+    return res.status(400).json({ error: "ID de video inválido" });
+  }
+
+  try {
+    console.log(`🎵 Iniciando stream para video: ${videoId}`);
+
+    // 1. Verificar cache
+    const cached = urlCache.get(videoId);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log(`📦 Usando URL en cache para ${videoId}`);
+      return streamAudio(res, cached.url, cached.mime);
+    }
+
+    // 2. Obtener info del video con retry
+    let info;
+    for (let i = 0; i < MAX_RETRIES; i++) {
+      try {
+        console.log(`📡 Intento ${i + 1}/${MAX_RETRIES}...`);
+        info = await ytdl.getInfo(videoId, {
+          lang: "es",
+          country: "US"
+        });
+        break;
+      } catch (err) {
+        if (i === MAX_RETRIES - 1) throw err;
+        console.log(`⏳ Retrasando ${RETRY_DELAY}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      }
+    }
+
+    // 3. Filtrar audio
+    const formats = info.formats.filter(f => f.mimeType?.includes("audio"));
+    const audio = formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+    if (!audio) {
+      throw new Error("No se encontró formato de audio disponible");
+    }
+
+    console.log(`🎧 Audio encontrado: ${audio.mimeType} - ${audio.bitrate}bps`);
+
+    // 4. Guardar en cache
+    urlCache.set(videoId, {
+      url: audio.url,
+      mime: audio.mimeType,
+      timestamp: Date.now()
+    });
+
+    console.log(`🔗 URL obtenida en ${Date.now() - startTime}ms`);
+
+    // 5. Iniciar streaming
+    await streamAudio(res, audio.url, audio.mimeType);
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    console.error(`❌ Stream error (${duration}ms):`, {
+      videoId,
+      error: err.message,
+      code: err.code
+    });
+    
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Error procesando stream",
+        message: err.message,
+        videoId: videoId
+      });
+    } else {
+      res.destroy();
+    }
+  }
+});
+
+async function streamAudio(res, url, mimeType) {
+  try {
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : Infinity;
+      const size = end - start + 1;
+
+      res.setHeader("Content-Range", `bytes ${start}-${end}/Infinity`);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Length", size);
+      res.status(206);
+    } else {
+      res.setHeader("Content-Length", "0");
+    }
+
+    res.setHeader("Content-Type", mimeType || "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000);
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      }
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`HTTP Error: ${response.status} - ${response.statusText}`);
+    }
+
+    response.body.on("error", (err) => {
+      console.error("❌ Error en el stream:", err.message);
+      res.destroy();
+    });
+
+    response.body.pipe(res);
+
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Error al conectar con el servidor de audio" });
+    } else {
+      res.destroy();
+    }
+  }
+}
+
+/* ===============================
+   🏥 HEALTH CHECK
+=============================== */
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    cacheSize: urlCache.size,
+    uptime: process.uptime()
+  });
+});
+
+/* ===============================
+   📊 METRICS
+=============================== */
+app.get("/metrics", (req, res) => {
+  res.json({
+    cacheSize: urlCache.size,
+    cacheTTL: CACHE_TTL,
+    maxRetries: MAX_RETRIES,
+    retryDelay: RETRY_DELAY
+  });
+});
+
+/* ===============================
+   🚀 START
+=============================== */
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+  console.log(`📍 Health: http://localhost:${PORT}/health`);
+  console.log(`📍 Search: http://localhost:${PORT}/search?q=example`);
+  console.log(`📍 Stream: http://localhost:${PORT}/stream/:videoId`);
+});  
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
