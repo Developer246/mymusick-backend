@@ -1,35 +1,48 @@
 {
   "name": "mymusick-backend",
-  "version": "2.0.0",
-  "description": "YouTube Music Backend API (Hybrid Engine)",
+  "version": "2.1.0",
+  "description": "YouTube Music Backend API (Hybrid Engine - youtubei.js focused)",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "lint": "eslint . --ext .js",
+    "test": "echo \"No tests configured yet\" && exit 0"
   },
- "dependencies": {
-  "youtubei.js": "^16.0.1",           
-  "@distube/ytdl-core": "^4.16.12",   
-  "cors": "^2.8.5",
-  "express": "^4.19.2",              
-  "express-rate-limit": "^7.4.0",     
-},
+  "dependencies": {
+    "youtubei.js": "^16.0.1",
+    "@distube/ytdl-core": "^4.16.12",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1"
+  },
   "devDependencies": {
-    "nodemon": "3.0.3"
+    "nodemon": "^3.1.9",
+    "eslint": "^9.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": [
     "youtube",
     "ytmusic",
     "streaming",
     "api",
-    "backend"
+    "backend",
+    "youtubei.js",
+    "music"
   ],
   "author": "Developer246",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/developer246.github.io/tu-usuario/mymusick-backend.git"
+  },
+  "bugs": {
+    "url": "https://github.com/developer246.github.io/mymusick-backend/issues"
+  },
+  "homepage": "https://github.com/developer246.github.io/mymusick-backend#readme"
 }
 
 
