@@ -11,15 +11,21 @@ const PORT = process.env.PORT || 3000;
 let yt;
 
 /* ===============================
-   📦 CACHE & RATE LIMITING
+   📦 CONFIGURACIÓN
 =============================== */
-const urlCache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+const FETCH_TIMEOUT = 30000; // 30 segundos
 
+// Cache de URLs
+const urlCache = new Map();
+
+// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 100, // 100 requests por ventana
-  message: { error: "Demasiadas peticiones, intenta más tarde" }
+  message: { error: "Demasiadas peticiones, intenta más tarde" },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 app.use(limiter);
@@ -32,15 +38,27 @@ async function initYT() {
     yt = await Innertube.create({
       client_type: "WEB_REMIX"
     });
-    console.log("YouTube Music inicializado 🎵");
+    console.log("✅ YouTube Music inicializado 🎵");
+    
+    // Limpiar cache cada 24 horas
+    setInterval(() => {
+      const now = Date.now();
+      for (const [key, value] of urlCache.entries()) {
+        if (now - value.timestamp > CACHE_TTL) {
+          urlCache.delete(key);
+        }
+      }
+      console.log(`🗑️ Cache limpiado: ${urlCache.size} elementos restantes`);
+    }, CACHE_TTL);
+    
   } catch (err) {
-    console.error("Error inicializando Innertube:", err);
+    console.error("❌ Error inicializando Innertube:", err.message);
     process.exit(1);
   }
 }
 
 /* ===============================
-   🔐 MIDDLEWARE
+   🔐 MIDDLEWARES
 =============================== */
 function requireYT(req, res, next) {
   if (!yt) {
@@ -54,13 +72,16 @@ function validateVideoId(id) {
 }
 
 /* ===============================
-   🔎 SEARCH - CANCIONES REALES
+   🔎 SEARCH - CANCIONES
 =============================== */
 app.get("/search", requireYT, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
+    console.log(`🔍 Buscando: "${q}"`);
     const search = await yt.music.search(q, { type: "song" });
     const section = search.contents?.find(s => Array.isArray(s?.contents));
 
@@ -78,10 +99,11 @@ app.get("/search", requireYT, async (req, res) => {
         thumbnail: getBestThumbnail(item.thumbnails)?.url
       }));
 
+    console.log(`✅ Search completado en ${Date.now() - startTime}ms`);
     res.json(songs);
 
   } catch (err) {
-    console.error("Search error:", err);
+    console.error("❌ Search error:", err.message);
     res.status(500).json({ error: "Error buscando canciones" });
   }
 });
@@ -95,10 +117,11 @@ function getBestThumbnail(thumbnails = []) {
 }
 
 /* ===============================
-   🎧 STREAM PROXY MEJORADO
+   🎧 STREAM PROXY
 =============================== */
 app.get("/stream/:id", requireYT, async (req, res) => {
   const videoId = req.params.id;
+  const startTime = Date.now();
 
   // Validar ID
   if (!validateVideoId(videoId)) {
@@ -106,36 +129,47 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
+    console.log(`🎵 Iniciando stream para video: ${videoId}`);
+
     // 1. Verificar cache
     const cached = urlCache.get(videoId);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return streamAudio(res, cached.url, cached.mime, cached.headers);
+      console.log(`📦 Usando URL en cache para ${videoId}`);
+      return streamAudio(res, cached.url, cached.mime);
     }
 
     // 2. Obtener info del video
+    console.log(`📡 Obteniendo info de YouTube...`);
     const info = await yt.getBasicInfo(videoId);
+    
+    if (!info || !info.streaming_data) {
+      throw new Error("No se encontraron datos de streaming");
+    }
+
+    // 3. Filtrar audio
     const formats = [
       ...(info.streaming_data?.adaptive_formats || []),
       ...(info.streaming_data?.formats || [])
     ];
 
-    // 3. Filtrar audio de mejor calidad
     const audio = formats
       .filter(f => f.mime_type?.includes("audio"))
       .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
 
     if (!audio) {
-      return res.status(404).json({ error: "No se encontró audio disponible" });
+      throw new Error("No se encontró formato de audio disponible");
     }
 
-    // 4. Manejar signatureCipher (youtubei.js ya lo hace, pero por seguridad)
+    console.log(`🎧 Audio encontrado: ${audio.mime_type} - ${audio.bitrate}bps`);
+
+    // 4. Manejar signatureCipher
     let finalUrl = audio.url;
     if (!finalUrl && audio.signatureCipher) {
       finalUrl = parseCipher(audio.signatureCipher);
     }
 
     if (!finalUrl) {
-      return res.status(404).json({ error: "No se pudo obtener la URL del audio" });
+      throw new Error("No se pudo obtener la URL del audio");
     }
 
     // 5. Guardar en cache
@@ -145,13 +179,25 @@ app.get("/stream/:id", requireYT, async (req, res) => {
       timestamp: Date.now()
     });
 
+    console.log(`🔗 URL obtenida en ${Date.now() - startTime}ms`);
+
     // 6. Iniciar streaming
     await streamAudio(res, finalUrl, audio.mime_type);
 
   } catch (err) {
-    console.error("Stream error:", err);
+    const duration = Date.now() - startTime;
+    console.error(`❌ Stream error (${duration}ms):`, {
+      videoId,
+      error: err.message,
+      stack: err.stack
+    });
+    
     if (!res.headersSent) {
-      res.status(500).json({ error: "Error procesando stream" });
+      res.status(500).json({
+        error: "Error procesando stream",
+        message: err.message,
+        videoId: videoId
+      });
     } else {
       res.destroy();
     }
@@ -166,7 +212,7 @@ function parseCipher(cipher) {
   return url && sp && sig ? `${url}&${sp}=${sig}` : null;
 }
 
-async function streamAudio(res, url, mimeType, extraHeaders = {}) {
+async function streamAudio(res, url, mimeType) {
   try {
     // 1. Manejar Range Requests (Seeking)
     const range = req.headers.range;
@@ -192,7 +238,7 @@ async function streamAudio(res, url, mimeType, extraHeaders = {}) {
 
     // 3. Fetch con timeout
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000); // 30 segundos
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
 
     const response = await fetch(url, {
       signal: controller.signal,
@@ -209,7 +255,7 @@ async function streamAudio(res, url, mimeType, extraHeaders = {}) {
 
     // 4. Manejo de errores en el stream
     response.body.on("error", (err) => {
-      console.error("Error en el stream:", err);
+      console.error("❌ Error en el stream:", err.message);
       res.destroy();
     });
 
@@ -226,11 +272,43 @@ async function streamAudio(res, url, mimeType, extraHeaders = {}) {
 }
 
 /* ===============================
+   🏥 HEALTH CHECK
+=============================== */
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    ytInitialized: !!yt,
+    cacheSize: urlCache.size,
+    uptime: process.uptime()
+  });
+});
+
+/* ===============================
+   📊 METRICS
+=============================== */
+app.get("/metrics", (req, res) => {
+  res.json({
+    cacheSize: urlCache.size,
+    cacheTTL: CACHE_TTL,
+    fetchTimeout: FETCH_TIMEOUT,
+    ytInitialized: !!yt
+  });
+});
+
+/* ===============================
    🚀 START
 =============================== */
 (async () => {
-  await initYT();
-  app.listen(PORT, () => {
-    console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
-  });
+  try {
+    await initYT();
+    app.listen(PORT, () => {
+      console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+      console.log(`📍 Health: http://localhost:${PORT}/health`);
+      console.log(`📍 Search: http://localhost:${PORT}/search?q=example`);
+      console.log(`📍 Stream: http://localhost:${PORT}/stream/:videoId`);
+    });
+  } catch (err) {
+    console.error("❌ Error inicializando servidor:", err);
+    process.exit(1);
+  }
 })();
