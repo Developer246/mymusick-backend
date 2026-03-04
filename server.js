@@ -61,66 +61,60 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
 /* ===============================
    🔎 SEARCH (YouTube Music style)
 =============================== */
-app.get("/search", async (req, res) => {
+app.get("/search", requireYT, async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q) return res.json([]);
-
-    const cached = searchCache.get(q);
-    if (cached && Date.now() - cached.time < CACHE_TTL) {
-      return res.json(cached.data);
+    if (!q) {
+      return res.json([]);
     }
 
-    if (!yt || !ytInitialized) {
-      return res.status(503).json({ error: "Servicio de YouTube no disponible aún, reintenta en unos segundos" });
+    const search = await yt.music.search(q, { type: "song" });
+
+    const section = search.contents?.find(section =>
+      Array.isArray(section?.contents)
+    );
+
+    if (!section) {
+      return res.json([]);
     }
 
-    let searchResults;
-    try {
-      // Preferimos el endpoint Music específico
-      searchResults = await yt.music.search(q, {
-        filter: "songs",
-        limit: 15
+    const songs = section.contents
+      .filter(item => item?.videoId || item?.id)
+      .slice(0, 10)
+      .map(item => {
+        const hdThumb = getBestThumbnail(item.thumbnails);
+
+        return {
+          id: item.videoId || item.id,
+          title: item.name || item.title || "Sin título",
+          artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+          album: item.album?.name || null,
+          duration: item.duration?.text || null,
+          thumbnail: hdThumb
+            ? hdThumb.url.replace(/w\\d+-h\\d+/, "w1080-h1080")
+            : null
+        };
       });
-    } catch (musicErr) {
-      console.warn("Búsqueda Music falló:", musicErr.message);
-      // Fallback a búsqueda general con contexto Music
-      searchResults = await yt.search(q, { client: "YTMUSIC" });
-    }
 
-    let songs = [];
-
-    // Estructura típica en v16.x (puede variar un poco → adapta si ves logs)
-    if (searchResults?.songs && Array.isArray(searchResults.songs)) {
-      songs = searchResults.songs.slice(0, 10).map(item => mapSong(item));
-    } else if (searchResults?.results) {
-      songs = searchResults.results
-        .filter(item => item.type === "song" || item.videoId)
-        .slice(0, 10)
-        .map(item => mapSong(item));
-    }
-
-    function mapSong(item) {
-      return {
-        id: item.id || item.videoId || "unknown",
-        title: item.title?.text || item.title || "Sin título",
-        artist: item.artists?.[0]?.name || item.author?.name || item.channel?.name || "Desconocido",
-        duration: item.duration?.text || item.duration?.simpleText || item.length || "0:00",
-        thumbnail: item.thumbnail?.[0]?.url || item.thumbnails?.[0]?.url || null
-      };
-    }
-
-    if (songs.length === 0) {
-      console.log(`No resultados para "${q}"`);
-    }
-
-    searchCache.set(q, { data: songs, time: Date.now() });
     res.json(songs);
+
   } catch (err) {
-    console.error("Error en /search:", err.message);
-    res.status(500).json({ error: "Error al buscar", details: err.message });
+    console.error("Search error:", err);
+    res.status(500).json({
+      error: "Error buscando canciones",
+      message: err.message
+    });
   }
 });
+
+function getBestThumbnail(thumbnails = []) {
+  return thumbnails.reduce((best, thumb) => {
+    const currentSize = (thumb.width || 0) * (thumb.height || 0);
+    const bestSize = (best?.width || 0) * (best?.height || 0);
+    return currentSize > bestSize ? thumb : best;
+  }, null);
+}
+
 
 /* ===============================
    🎧 STREAM AUDIO (solo youtubei.js)
