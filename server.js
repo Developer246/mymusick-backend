@@ -119,7 +119,7 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     }
 
     if (!audio?.url) {
-      return res.status(404).json({ error: "Audio no disponible" });
+      return res.status(404).json({ error: err.messaje });
     }
 
     const response = await fetch(audio.url);
