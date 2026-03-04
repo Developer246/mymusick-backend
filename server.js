@@ -33,10 +33,13 @@ function validateVideoId(id) {
    🔎 SEARCH - CANCIONES
 =============================== */
 app.get("/search", async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
+    console.log(`🔍 Buscando: "${q}"`);
     const search = await ytdl.search(q, { filter: "music_songs" });
     const songs = search
       .slice(0, 10)
@@ -48,10 +51,11 @@ app.get("/search", async (req, res) => {
         thumbnail: item.thumbnails?.[0]?.url || null
       }));
 
+    console.log(`✅ Search completado en ${Date.now() - startTime}ms`);
     res.json(songs);
 
   } catch (err) {
-    console.error("Search error:", err.message);
+    console.error("❌ Search error:", err.message);
     res.status(500).json({ error: "Error buscando canciones" });
   }
 });
