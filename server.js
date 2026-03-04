@@ -1,65 +1,37 @@
 const express = require("express");
 const cors = require("cors");
-const rateLimit = require("express-rate-limit");
-const path = require("path");
-const { Innertube, UniversalCache } = require("youtubei.js");
+const { Innertube } = require("youtubei.js");
 
 const app = express();
-
 app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
 
-/* ===============================
-   RATE LIMIT (ajustado para producción en Render)
-=============================== */
-app.use(
-  rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutos
-    max: 180,                 // subido un poco, pero monitorea abuso
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Demasiadas peticiones, espera un momento" }
-  })
-);
+let yt;
 
 /* ===============================
-   CLIENT YouTube (youtubei.js v16.x - 2026)
+   Inicialización
 =============================== */
-let yt = null;
-let ytInitialized = false;
-
 async function initYT() {
-  if (ytInitialized) return;
+  yt = await Innertube.create({
+    client_type: "WEB_REMIX"   // cliente más estable para YouTube Music
+  });
 
-  try {
-    yt = await Innertube.create({
-      // Evitamos client_type string (cambió/deprecado en versiones recientes)
-      // retrieve_player: false,     // ahorra requests si no necesitas player
-      cache: new UniversalCache(false), // false = sin disco, más rápido en Render
-      generate_session_locally: true    // ayuda con algunos rate-limits/bloqueos
-    });
-
-    ytInitialized = true;
-    console.log("🎵 YouTube client inicializado correctamente");
-  } catch (err) {
-    console.error("Error inicializando youtubei.js:", err.message);
-    setTimeout(initYT, 12000); // retry en 12 segundos
-  }
+  console.log("YouTube Music inicializado 🎵");
 }
 
-initYT(); // Inicia al levantar el server
-
 /* ===============================
-   CACHE SIMPLE (para búsquedas)
+   Middleware
 =============================== */
-const searchCache = new Map();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+function requireYT(req, res, next) {
+  if (!yt) {
+    return res.status(503).json({ error: "YT no inicializado" });
+  }
+  next();
+}
 
 /* ===============================
-   🔎 SEARCH (YouTube Music style)
+   🔎 SEARCH - SOLO CANCIONES REALES
 =============================== */
 app.get("/search", requireYT, async (req, res) => {
   try {
@@ -115,91 +87,78 @@ function getBestThumbnail(thumbnails = []) {
   }, null);
 }
 
-
 /* ===============================
-   🎧 STREAM AUDIO (solo youtubei.js)
+   🎧 STREAM PROXY
 =============================== */
-function validateVideoId(id) {
-  return /^[a-zA-Z0-9_-]{11}$/.test(id);
+function parseCipher(cipher) {
+  const params = new URLSearchParams(cipher);
+  return `${params.get("url")}&${params.get("sp")}=${params.get("sig")}`;
 }
 
-app.get("/stream/:id", async (req, res) => {
-  const videoId = req.params.id;
-
-  if (!validateVideoId(videoId)) {
-    return res.status(400).json({ error: "ID de video inválido" });
-  }
-
-  if (!yt || !ytInitialized) {
-    return res.status(503).json({ error: "Servicio no listo" });
-  }
-
+app.get("/stream/:id", requireYT, async (req, res) => {
   try {
-    // Obtenemos info básica + formatos (contexto Music ayuda con disponibilidad)
-    const info = await yt.getBasicInfo(videoId, { client: "YTMUSIC" });
+    // ⚡ Usamos getBasicInfo en lugar de getInfo
+    const info = await yt.getBasicInfo(req.params.id);
 
-    const format = info.chooseFormat({
-      type: "audio",
-      quality: "best"          // o "highest"
-      // Puedes agregar: bitrate: "high" si quieres filtrar más
-    });
+    const formats = [
+      ...(info.streaming_data?.adaptive_formats || []),
+      ...(info.streaming_data?.formats || [])
+    ];
 
-    if (!format) {
-      return res.status(404).json({ error: "No se encontró formato de audio disponible" });
+    let audio = formats
+      .filter(f => f.mime_type?.includes("audio"))
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+    if (!audio?.url && audio?.signatureCipher) {
+      try {
+        audio.url = parseCipher(audio.signatureCipher);
+      } catch (err) {
+        console.error("Cipher parse error:", err);
+        return res.status(500).json({ error: "No se pudo decodificar el audio", message: err.message });
+      }
     }
 
-    res.set({
-      "Content-Type": format.mime_type || "audio/mp4",
-      "Accept-Ranges": "bytes",
-      "Cache-Control": "no-cache, no-store, private",
-      "Content-Disposition": "inline"
-    });
+    if (!audio?.url) {
+      return res.status(404).json({ error: "Audio no disponible" });
+    }
 
-    const stream = await format.createStream();
+    const response = await fetch(audio.url);
 
-    stream.pipe(res);
+    if (!response.body) {
+      return res.status(500).json({ error: "No se pudo obtener el audio" });
+    }
 
-    stream.on("error", (err) => {
-      console.error("Error en stream:", err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Error durante el streaming" });
-      }
-      res.end();
+    res.setHeader("Content-Type", audio.mime_type || "audio/mpeg");
+    res.setHeader("Cache-Control", "no-store");
+
+    response.body.on("data", chunk => res.write(chunk));
+    response.body.on("end", () => res.end());
+    response.body.on("error", err => {
+      console.error("Stream error:", err);
+      res.status(500).json({ error: "Error en el stream", message: err.message });
     });
 
   } catch (err) {
-    const status = err.message?.includes("403") || err.message?.includes("unavailable") ? 403 : 500;
-    console.error("Stream fatal:", err.message);
-    res.status(status).json({
-      error: "No se pudo reproducir el audio",
-      details: err.message.slice(0, 150)
+    console.error("Stream error REAL:", err);
+    res.status(500).json({
+      error: "Error procesando stream",
+      message: err.message
     });
   }
 });
 
 /* ===============================
-   HEALTH CHECK
+   🚀 START
 =============================== */
-app.get("/health", (req, res) => {
-  res.json({
-    status: ytInitialized ? "ok" : "initializing",
-    uptime: process.uptime(),
-    ytReady: ytInitialized,
-    timestamp: new Date().toISOString(),
-    version: "2.1.0"
-  });
-});
+(async () => {
+  try {
+    await initYT();
+    app.listen(PORT, () => {
+      console.log(`Servidor corriendo en puerto ${PORT} 🚀`);
+    });
+  } catch (err) {
+    console.error("Error inicializando YT:", err);
+    process.exit(1);
+  }
+})();
 
-/* ===============================
-   404 para rutas no encontradas
-=============================== */
-app.use((req, res) => {
-  res.status(404).json({ error: "Endpoint no encontrado" });
-});
-
-/* ===============================
-   START SERVER
-=============================== */
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
-});
