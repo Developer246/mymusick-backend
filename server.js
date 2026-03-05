@@ -1,8 +1,6 @@
 const express    = require("express");
 const cors       = require("cors");
-const ytdl       = require("@distube/ytdl-core");
 const { Innertube } = require("youtubei.js");
-const { HttpsProxyAgent } = require("https-proxy-agent");
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -11,97 +9,96 @@ app.use(cors());
 app.use(express.json());
 
 /* ===============================
+   INSTANCIAS INVIDIOUS PÚBLICAS
+   Se rotan si una falla
+=============================== */
+const INVIDIOUS_INSTANCES = [
+  "https://iv.datura.network",
+  "https://invidious.privacydev.net",
+  "https://yt.cdaut.de",
+  "https://invidious.nerdvpn.de",
+  "https://invidious.io.lol",
+];
+
+let currentInstance = 0;
+
+function getNextInstance() {
+  const instance = INVIDIOUS_INSTANCES[currentInstance];
+  currentInstance = (currentInstance + 1) % INVIDIOUS_INSTANCES.length;
+  return instance;
+}
+
+/* ===============================
    ESTADO GLOBAL
 =============================== */
-let ytMusic    = null;   // instancia reutilizable
-let ytAgent    = null;
-let proxyAgent = null;
-let initPromise = null;  // evita inicializaciones paralelas
-
-/* ===============================
-   PARSEAR cookies.txt desde env
-=============================== */
-function parseCookiesTxt(content) {
-  return content
-    .split("\n")
-    .filter(line => line.trim() && !line.startsWith("#"))
-    .map(line => {
-      const parts = line.split("\t");
-      if (parts.length < 7) return null;
-      return {
-        domain:   parts[0],
-        httpOnly: parts[1] === "TRUE",
-        path:     parts[2],
-        secure:   parts[3] === "TRUE",
-        expires:  parseInt(parts[4]) || 0,
-        name:     parts[5],
-        value:    parts[6].trim(),
-      };
-    })
-    .filter(Boolean);
-}
-
-/* ===============================
-   CARGAR COOKIES Y PROXY
-=============================== */
-function loadAgent() {
-  const raw   = process.env.YOUTUBE_COOKIES;
-  const proxy = process.env.PROXY_URL;
-
-  if (!raw) {
-    console.warn("⚠️  YOUTUBE_COOKIES no definida");
-    return null;
-  }
-
-  try {
-    const cookies = parseCookiesTxt(raw);
-
-    if (proxy) {
-      proxyAgent = new HttpsProxyAgent(proxy);
-      console.log("🌐 Proxy:", proxy.replace(/:\/\/.*@/, "://*****@"));
-      const agent = ytdl.createProxyAgent({ uri: proxy }, cookies);
-      console.log(`🍪 ${cookies.length} cookies + proxy`);
-      return agent;
-    }
-
-    const agent = ytdl.createAgent(cookies);
-    console.log(`🍪 ${cookies.length} cookies cargadas`);
-    return agent;
-
-  } catch (err) {
-    console.error("❌ Error cargando agente:", err.message);
-    return null;
-  }
-}
+let ytMusic     = null;
+let initPromise = null;
 
 /* ===============================
    INICIALIZAR INNERTUBE
-   Reutiliza la instancia existente.
-   Si falla, la recrea automáticamente.
 =============================== */
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
-
-  // Si ya hay una inicialización en curso, esperar a que termine
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     console.log("🔄 Inicializando Innertube...");
-    const proxy = process.env.PROXY_URL;
-
-    ytMusic = await Innertube.create({
-      client_type: "WEB_REMIX",
-      ...(proxy && proxyAgent ? {
-        fetch: (input, init) => fetch(input, { ...init, agent: proxyAgent }),
-      } : {}),
-    });
-
-    console.log("✅ Innertube listo");
+    ytMusic     = await Innertube.create({ client_type: "WEB_REMIX" });
     initPromise = null;
+    console.log("✅ Innertube listo");
     return ytMusic;
   })();
 
   return initPromise;
+}
+
+/* ===============================
+   OBTENER URL DE AUDIO VÍA INVIDIOUS
+   Rota instancias si una falla
+=============================== */
+async function getAudioFromInvidious(videoId) {
+  const tried = new Set();
+
+  while (tried.size < INVIDIOUS_INSTANCES.length) {
+    const instance = getNextInstance();
+    if (tried.has(instance)) continue;
+    tried.add(instance);
+
+    try {
+      const url  = `${instance}/api/v1/videos/${videoId}`;
+      const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
+
+      if (!res.ok) {
+        console.warn(`⚠️  ${instance} respondió ${res.status}`);
+        continue;
+      }
+
+      const data = await res.json();
+
+      // Filtrar solo formatos de audio, ordenar por bitrate
+      const audioFormats = (data.adaptiveFormats || [])
+        .filter(f => f.type?.includes("audio") && f.url)
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+
+      if (!audioFormats.length) {
+        console.warn(`⚠️  ${instance} sin formatos de audio`);
+        continue;
+      }
+
+      const best = audioFormats[0];
+      console.log(`✅ Audio desde ${instance} — ${best.type?.split(";")[0]} @ ${best.bitrate}bps`);
+
+      return {
+        url:      best.url,
+        mimeType: best.type?.split(";")[0] || "audio/webm",
+      };
+
+    } catch (err) {
+      console.warn(`⚠️  ${instance} error: ${err.message}`);
+    }
+  }
+
+  throw new Error("Todas las instancias de Invidious fallaron");
 }
 
 /* ===============================
@@ -135,13 +132,11 @@ app.get("/search", async (req, res) => {
     if (!q) return res.json([]);
 
     const t0 = Date.now();
-
-    // Reutiliza instancia — si falla, la recrea una vez
     let yt;
+
     try {
       yt = await getYTMusic();
     } catch (err) {
-      console.error("❌ Error obteniendo instancia:", err.message);
       return res.status(503).json({ error: "Servicio no disponible, intenta de nuevo" });
     }
 
@@ -149,7 +144,6 @@ app.get("/search", async (req, res) => {
     try {
       search = await yt.music.search(q, { type: "song" });
     } catch (err) {
-      // Si la instancia expiró, resetear y reintentar una vez
       console.warn("⚠️  Instancia inválida, reiniciando...");
       ytMusic = null;
       yt      = await getYTMusic();
@@ -186,38 +180,21 @@ app.get("/search", async (req, res) => {
 
 /* ===============================
    GET /stream/:id
+   Obtiene URL de audio vía Invidious
+   y hace redirect directo al cliente
 =============================== */
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
-  if (!ytdl.validateID(id)) {
+  if (!id?.match(/^[\w-]{5,20}$/)) {
     return res.status(400).json({ error: "ID de video inválido" });
   }
 
   try {
-    const url        = `https://www.youtube.com/watch?v=${id}`;
-    const infoOpts   = ytAgent ? { agent: ytAgent } : {};
-    const streamOpts = { quality: "highestaudio", filter: "audioonly", ...infoOpts };
+    const { url, mimeType } = await getAudioFromInvidious(id);
 
-    const info   = await ytdl.getInfo(url, infoOpts);
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: "highestaudio",
-      filter:  "audioonly",
-    });
-
-    if (!format) {
-      return res.status(404).json({ error: "No hay formatos de audio disponibles" });
-    }
-
-    res.setHeader("Content-Type",  format.mimeType?.split(";")[0] || "audio/webm");
-    res.setHeader("Cache-Control", "no-store");
-
-    ytdl(url, streamOpts)
-      .on("error", err => {
-        console.error("❌ ytdl stream error:", err.message);
-        if (!res.headersSent) res.status(500).end();
-      })
-      .pipe(res);
+    // Redirect directo — el navegador descarga el audio sin pasar por el servidor
+    res.redirect(302, url);
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -232,26 +209,18 @@ app.get("/stream/:id", async (req, res) => {
 =============================== */
 app.get("/health", (req, res) => {
   res.json({
-    status:        "ok",
-    cookiesLoaded: !!ytAgent,
-    proxyLoaded:   !!proxyAgent,
-    ytReady:       !!ytMusic,
-    port:          PORT,
+    status:   "ok",
+    ytReady:  !!ytMusic,
+    port:     PORT,
   });
 });
 
 /* ===============================
    ARRANQUE
-   Pre-calienta la instancia de Innertube
-   para que la primera búsqueda sea rápida
 =============================== */
 (async () => {
   try {
-    ytAgent = loadAgent();
-
-    // Precalentar Innertube al arrancar → primera búsqueda instantánea
     await getYTMusic();
-
     app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
   } catch (err) {
     console.error("❌ Error arrancando:", err);
