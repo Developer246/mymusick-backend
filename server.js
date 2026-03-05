@@ -1,38 +1,43 @@
 const express    = require("express");
 const cors       = require("cors");
+const { spawn }  = require("child_process");
 const { Innertube } = require("youtubei.js");
+const fs         = require("fs");
+const path       = require("path");
 
-const app  = express();
-const PORT = process.env.PORT || 3000;
+const app     = express();
+const PORT    = process.env.PORT || 3000;
+const YTDLP   = path.join(__dirname, "bin", "yt-dlp");
+const COOKIES = path.join(__dirname, "cookies.txt");
 
 app.use(cors());
 app.use(express.json());
-
-/* ===============================
-   INSTANCIAS INVIDIOUS PÚBLICAS
-   Se rotan si una falla
-=============================== */
-const INVIDIOUS_INSTANCES = [
-  "https://iv.datura.network",
-  "https://invidious.privacydev.net",
-  "https://yt.cdaut.de",
-  "https://invidious.nerdvpn.de",
-  "https://invidious.io.lol",
-];
-
-let currentInstance = 0;
-
-function getNextInstance() {
-  const instance = INVIDIOUS_INSTANCES[currentInstance];
-  currentInstance = (currentInstance + 1) % INVIDIOUS_INSTANCES.length;
-  return instance;
-}
 
 /* ===============================
    ESTADO GLOBAL
 =============================== */
 let ytMusic     = null;
 let initPromise = null;
+
+/* ===============================
+   ESCRIBIR COOKIES AL DISCO
+   yt-dlp necesita un archivo físico
+=============================== */
+function writeCookies() {
+  const raw = process.env.YOUTUBE_COOKIES;
+  if (!raw) {
+    console.warn("⚠️  YOUTUBE_COOKIES no definida");
+    return false;
+  }
+  try {
+    fs.writeFileSync(COOKIES, raw, "utf-8");
+    console.log("🍪 cookies.txt escrito en disco");
+    return true;
+  } catch (err) {
+    console.error("❌ Error escribiendo cookies:", err.message);
+    return false;
+  }
+}
 
 /* ===============================
    INICIALIZAR INNERTUBE
@@ -42,7 +47,6 @@ async function getYTMusic() {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    console.log("🔄 Inicializando Innertube...");
     ytMusic     = await Innertube.create({ client_type: "WEB_REMIX" });
     initPromise = null;
     console.log("✅ Innertube listo");
@@ -53,52 +57,41 @@ async function getYTMusic() {
 }
 
 /* ===============================
-   OBTENER URL DE AUDIO VÍA INVIDIOUS
-   Rota instancias si una falla
+   OBTENER URL DE AUDIO CON yt-dlp
 =============================== */
-async function getAudioFromInvidious(videoId) {
-  const tried = new Set();
+function getAudioUrl(videoId) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "--no-playlist",
+      "--no-warnings",
+      "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
+      "--get-url",
+    ];
 
-  while (tried.size < INVIDIOUS_INSTANCES.length) {
-    const instance = getNextInstance();
-    if (tried.has(instance)) continue;
-    tried.add(instance);
-
-    try {
-      const url  = `${instance}/api/v1/videos/${videoId}`;
-      const res  = await fetch(url, { signal: AbortSignal.timeout(8000) });
-
-      if (!res.ok) {
-        console.warn(`⚠️  ${instance} respondió ${res.status}`);
-        continue;
-      }
-
-      const data = await res.json();
-
-      // Filtrar solo formatos de audio, ordenar por bitrate
-      const audioFormats = (data.adaptiveFormats || [])
-        .filter(f => f.type?.includes("audio") && f.url)
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-
-      if (!audioFormats.length) {
-        console.warn(`⚠️  ${instance} sin formatos de audio`);
-        continue;
-      }
-
-      const best = audioFormats[0];
-      console.log(`✅ Audio desde ${instance} — ${best.type?.split(";")[0]} @ ${best.bitrate}bps`);
-
-      return {
-        url:      best.url,
-        mimeType: best.type?.split(";")[0] || "audio/webm",
-      };
-
-    } catch (err) {
-      console.warn(`⚠️  ${instance} error: ${err.message}`);
+    // Usar cookies si existen
+    if (fs.existsSync(COOKIES)) {
+      args.push("--cookies", COOKIES);
     }
-  }
 
-  throw new Error("Todas las instancias de Invidious fallaron");
+    args.push(`https://www.youtube.com/watch?v=${videoId}`);
+
+    const proc = spawn(YTDLP, args);
+    let url = "", err = "";
+
+    proc.stdout.on("data", d => { url += d.toString(); });
+    proc.stderr.on("data", d => { err += d.toString(); });
+
+    proc.on("close", code => {
+      url = url.trim();
+      if (code === 0 && url) {
+        resolve(url);
+      } else {
+        reject(new Error(err.trim() || `yt-dlp código ${code}`));
+      }
+    });
+
+    proc.on("error", e => reject(new Error(`yt-dlp no encontrado: ${e.message}`)));
+  });
 }
 
 /* ===============================
@@ -136,15 +129,14 @@ app.get("/search", async (req, res) => {
 
     try {
       yt = await getYTMusic();
-    } catch (err) {
-      return res.status(503).json({ error: "Servicio no disponible, intenta de nuevo" });
+    } catch {
+      return res.status(503).json({ error: "Servicio no disponible" });
     }
 
     let search;
     try {
       search = await yt.music.search(q, { type: "song" });
-    } catch (err) {
-      console.warn("⚠️  Instancia inválida, reiniciando...");
+    } catch {
       ytMusic = null;
       yt      = await getYTMusic();
       search  = await yt.music.search(q, { type: "song" });
@@ -180,22 +172,19 @@ app.get("/search", async (req, res) => {
 
 /* ===============================
    GET /stream/:id
-   Obtiene URL de audio vía Invidious
-   y hace redirect directo al cliente
 =============================== */
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!id?.match(/^[\w-]{5,20}$/)) {
-    return res.status(400).json({ error: "ID de video inválido" });
+    return res.status(400).json({ error: "ID inválido" });
   }
 
   try {
-    const { url, mimeType } = await getAudioFromInvidious(id);
-
-    // Redirect directo — el navegador descarga el audio sin pasar por el servidor
-    res.redirect(302, url);
-
+    console.log(`🎵 Obteniendo audio: ${id}`);
+    const audioUrl = await getAudioUrl(id);
+    console.log(`✅ Redirect para: ${id}`);
+    res.redirect(302, audioUrl);
   } catch (err) {
     console.error("❌ /stream error:", err.message);
     if (!res.headersSent) {
@@ -209,9 +198,11 @@ app.get("/stream/:id", async (req, res) => {
 =============================== */
 app.get("/health", (req, res) => {
   res.json({
-    status:   "ok",
-    ytReady:  !!ytMusic,
-    port:     PORT,
+    status:       "ok",
+    ytReady:      !!ytMusic,
+    ytdlpExists:  fs.existsSync(YTDLP),
+    cookiesExist: fs.existsSync(COOKIES),
+    port:         PORT,
   });
 });
 
@@ -220,6 +211,7 @@ app.get("/health", (req, res) => {
 =============================== */
 (async () => {
   try {
+    writeCookies();
     await getYTMusic();
     app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
   } catch (err) {
