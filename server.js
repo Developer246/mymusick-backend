@@ -10,25 +10,32 @@ app.use(express.json());
 
 /* ===============================
    ESTADO GLOBAL
+   - ytMusic : cliente WEB_REMIX  → búsquedas
+   - ytWeb   : cliente WEB        → streaming
 =============================== */
-let yt = null;
+let ytMusic = null;
+let ytWeb   = null;
 
 /* ===============================
    INICIALIZACIÓN
 =============================== */
 async function initYT() {
-  yt = await Innertube.create({
-    client_type:      "WEB_REMIX",
-    retrieve_player:  true,
-  });
-  console.log("✅ YouTube Music inicializado");
+  // Cliente de YouTube Music para búsquedas
+  ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
+
+  // Cliente web estándar para obtener streaming data
+  ytWeb = await Innertube.create({ client_type: "WEB" });
+
+  console.log("✅ YouTube Music + Web inicializados");
 }
 
 /* ===============================
    MIDDLEWARE
 =============================== */
 function requireYT(req, res, next) {
-  if (!yt) return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
+  if (!ytMusic || !ytWeb) {
+    return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
+  }
   next();
 }
 
@@ -62,7 +69,7 @@ app.get("/search", requireYT, async (req, res) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const search  = await yt.music.search(q, { type: "song" });
+    const search  = await ytMusic.music.search(q, { type: "song" });
     const section = search.contents?.find(s => Array.isArray(s?.contents));
 
     if (!section) return res.json([]);
@@ -93,6 +100,8 @@ app.get("/search", requireYT, async (req, res) => {
 
 /* ===============================
    GET /stream/:id
+   Usa el cliente WEB estándar que sí
+   devuelve streaming_data completo
 =============================== */
 app.get("/stream/:id", requireYT, async (req, res) => {
   const { id } = req.params;
@@ -102,8 +111,7 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    // yt.music.getInfo maneja correctamente el formato SingleColumnMusicWatchNextResults
-    const info = await yt.music.getInfo(id);
+    const info = await ytWeb.getInfo(id);
 
     const format = info.chooseFormat({
       type:    "audio",
@@ -142,7 +150,7 @@ app.get("/stream/:id", requireYT, async (req, res) => {
    GET /health
 =============================== */
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", ytReady: !!yt, port: PORT });
+  res.json({ status: "ok", ytMusicReady: !!ytMusic, ytWebReady: !!ytWeb, port: PORT });
 });
 
 /* ===============================
