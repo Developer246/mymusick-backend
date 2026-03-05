@@ -106,7 +106,7 @@ function getAudioUrl(videoId) {
     const args = [
       "--no-playlist",
       "--no-warnings",
-      "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
+      "-f", "bestaudio/best",
       "--get-url",
     ];
 
