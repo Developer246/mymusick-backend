@@ -2,6 +2,7 @@ const express    = require("express");
 const cors       = require("cors");
 const ytdl       = require("@distube/ytdl-core");
 const { Innertube } = require("youtubei.js");
+const { HttpsProxyAgent } = require("https-proxy-agent");
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -12,7 +13,10 @@ app.use(express.json());
 /* ===============================
    ESTADO GLOBAL
 =============================== */
-let ytAgent = null;
+let ytMusic    = null;   // instancia reutilizable
+let ytAgent    = null;
+let proxyAgent = null;
+let initPromise = null;  // evita inicializaciones paralelas
 
 /* ===============================
    PARSEAR cookies.txt desde env
@@ -37,30 +41,67 @@ function parseCookiesTxt(content) {
     .filter(Boolean);
 }
 
+/* ===============================
+   CARGAR COOKIES Y PROXY
+=============================== */
 function loadAgent() {
-  const raw = process.env.YOUTUBE_COOKIES;
+  const raw   = process.env.YOUTUBE_COOKIES;
+  const proxy = process.env.PROXY_URL;
+
   if (!raw) {
     console.warn("⚠️  YOUTUBE_COOKIES no definida");
     return null;
   }
+
   try {
     const cookies = parseCookiesTxt(raw);
-    const agent   = ytdl.createAgent(cookies);
+
+    if (proxy) {
+      proxyAgent = new HttpsProxyAgent(proxy);
+      console.log("🌐 Proxy:", proxy.replace(/:\/\/.*@/, "://*****@"));
+      const agent = ytdl.createProxyAgent({ uri: proxy }, cookies);
+      console.log(`🍪 ${cookies.length} cookies + proxy`);
+      return agent;
+    }
+
+    const agent = ytdl.createAgent(cookies);
     console.log(`🍪 ${cookies.length} cookies cargadas`);
     return agent;
+
   } catch (err) {
-    console.error("❌ Error cargando cookies:", err.message);
+    console.error("❌ Error cargando agente:", err.message);
     return null;
   }
 }
 
 /* ===============================
-   CREAR instancia fresca de Innertube
-   Una por búsqueda para evitar caché
-   de resultados entre peticiones
+   INICIALIZAR INNERTUBE
+   Reutiliza la instancia existente.
+   Si falla, la recrea automáticamente.
 =============================== */
-async function createYTMusic() {
-  return await Innertube.create({ client_type: "WEB_REMIX" });
+async function getYTMusic() {
+  if (ytMusic) return ytMusic;
+
+  // Si ya hay una inicialización en curso, esperar a que termine
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    console.log("🔄 Inicializando Innertube...");
+    const proxy = process.env.PROXY_URL;
+
+    ytMusic = await Innertube.create({
+      client_type: "WEB_REMIX",
+      ...(proxy && proxyAgent ? {
+        fetch: (input, init) => fetch(input, { ...init, agent: proxyAgent }),
+      } : {}),
+    });
+
+    console.log("✅ Innertube listo");
+    initPromise = null;
+    return ytMusic;
+  })();
+
+  return initPromise;
 }
 
 /* ===============================
@@ -93,11 +134,29 @@ app.get("/search", async (req, res) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    // Instancia nueva por búsqueda → resultados siempre frescos
-    const yt      = await createYTMusic();
-    const search  = await yt.music.search(q, { type: "song" });
-    const section = search.contents?.find(s => Array.isArray(s?.contents));
+    const t0 = Date.now();
 
+    // Reutiliza instancia — si falla, la recrea una vez
+    let yt;
+    try {
+      yt = await getYTMusic();
+    } catch (err) {
+      console.error("❌ Error obteniendo instancia:", err.message);
+      return res.status(503).json({ error: "Servicio no disponible, intenta de nuevo" });
+    }
+
+    let search;
+    try {
+      search = await yt.music.search(q, { type: "song" });
+    } catch (err) {
+      // Si la instancia expiró, resetear y reintentar una vez
+      console.warn("⚠️  Instancia inválida, reiniciando...");
+      ytMusic = null;
+      yt      = await getYTMusic();
+      search  = await yt.music.search(q, { type: "song" });
+    }
+
+    const section = search.contents?.find(s => Array.isArray(s?.contents));
     if (!section) return res.json([]);
 
     const songs = section.contents
@@ -116,7 +175,7 @@ app.get("/search", async (req, res) => {
         };
       });
 
-    console.log(`🔍 "${q}" → ${songs.length} resultados`);
+    console.log(`🔍 "${q}" → ${songs.length} resultados en ${Date.now() - t0}ms`);
     res.json(songs);
 
   } catch (err) {
@@ -175,16 +234,24 @@ app.get("/health", (req, res) => {
   res.json({
     status:        "ok",
     cookiesLoaded: !!ytAgent,
+    proxyLoaded:   !!proxyAgent,
+    ytReady:       !!ytMusic,
     port:          PORT,
   });
 });
 
 /* ===============================
    ARRANQUE
+   Pre-calienta la instancia de Innertube
+   para que la primera búsqueda sea rápida
 =============================== */
 (async () => {
   try {
     ytAgent = loadAgent();
+
+    // Precalentar Innertube al arrancar → primera búsqueda instantánea
+    await getYTMusic();
+
     app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
   } catch (err) {
     console.error("❌ Error arrancando:", err);
