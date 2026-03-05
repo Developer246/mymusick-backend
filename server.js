@@ -191,11 +191,31 @@ app.get("/search", async (req, res) => {
       search  = await yt.music.search(q, { type: "song" });
     }
 
-    const section = search.contents?.find(s => Array.isArray(s?.contents));
-    if (!section) return res.json([]);
+    // youtubei.js v16 puede anidar los resultados en distintos niveles
+    let items = [];
 
-    const songs = section.contents
-      .filter(item => item?.videoId || item?.id)
+    for (const section of (search.contents || [])) {
+      // Nivel directo
+      if (Array.isArray(section?.contents)) {
+        const found = section.contents.filter(i => i?.videoId || i?.id);
+        if (found.length) { items = found; break; }
+      }
+      // Nivel anidado (MusicShelf, etc.)
+      if (Array.isArray(section?.contents)) {
+        for (const sub of section.contents) {
+          if (Array.isArray(sub?.contents)) {
+            const found = sub.contents.filter(i => i?.videoId || i?.id);
+            if (found.length) { items = found; break; }
+          }
+        }
+      }
+      if (items.length) break;
+    }
+
+    console.log(`📦 Items encontrados: ${items.length}`);
+    if (!items.length) return res.json([]);
+
+    const songs = items
       .slice(0, 10)
       .map(item => {
         const thumb = getBestThumbnail(item.thumbnails);
