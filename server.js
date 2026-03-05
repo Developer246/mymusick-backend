@@ -22,7 +22,6 @@ let initPromise = null;
 
 /* ===============================
    DESCARGAR yt-dlp a /tmp
-   /tmp siempre es escribible en Render
 =============================== */
 function downloadYtDlp() {
   return new Promise((resolve, reject) => {
@@ -32,12 +31,10 @@ function downloadYtDlp() {
     }
 
     console.log("⬇️  Descargando yt-dlp...");
-    const url  = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
     const file = fs.createWriteStream(YTDLP);
 
     const request = (reqUrl) => {
       https.get(reqUrl, res => {
-        // Seguir redirects
         if (res.statusCode === 301 || res.statusCode === 302) {
           return request(res.headers.location);
         }
@@ -48,7 +45,7 @@ function downloadYtDlp() {
         file.on("finish", () => {
           file.close(() => {
             fs.chmodSync(YTDLP, 0o755);
-            console.log("✅ yt-dlp descargado y listo");
+            console.log("✅ yt-dlp listo");
             resolve();
           });
         });
@@ -58,12 +55,14 @@ function downloadYtDlp() {
       });
     };
 
-    request(url);
+    request("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp");
   });
 }
 
 /* ===============================
    ESCRIBIR COOKIES A /tmp
+   Render puede escapar los saltos de línea
+   como \n literales — los restauramos
 =============================== */
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
@@ -72,8 +71,13 @@ function writeCookies() {
     return false;
   }
   try {
-    fs.writeFileSync(COOKIES, raw, "utf-8");
-    console.log("🍪 cookies.txt escrito en /tmp");
+    // Convertir \n literales a saltos de línea reales
+    const content = raw.replace(/\\n/g, "\n");
+    fs.writeFileSync(COOKIES, content, "utf-8");
+
+    const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#"));
+    console.log(`🍪 ${lines.length} cookies escritas en /tmp`);
+    console.log(`🍪 Primera línea de datos: ${lines[0]?.substring(0, 60)}...`);
     return true;
   } catch (err) {
     console.error("❌ Error escribiendo cookies:", err.message);
@@ -112,9 +116,13 @@ function getAudioUrl(videoId) {
 
     if (fs.existsSync(COOKIES)) {
       args.push("--cookies", COOKIES);
+      console.log(`🍪 Pasando cookies a yt-dlp: ${COOKIES}`);
+    } else {
+      console.warn("⚠️  Sin cookies para yt-dlp");
     }
 
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
+    console.log(`▶ yt-dlp ${args.join(" ")}`);
 
     const proc = spawn(YTDLP, args);
     let url = "", errOut = "";
@@ -238,11 +246,16 @@ app.get("/stream/:id", async (req, res) => {
    GET /health
 =============================== */
 app.get("/health", (req, res) => {
+  const cookieContent = fs.existsSync(COOKIES)
+    ? fs.readFileSync(COOKIES, "utf-8").split("\n").filter(l => l.trim() && !l.startsWith("#")).length
+    : 0;
+
   res.json({
     status:       "ok",
     ytReady:      !!ytMusic,
     ytdlpExists:  fs.existsSync(YTDLP),
     cookiesExist: fs.existsSync(COOKIES),
+    cookieLines:  cookieContent,
     port:         PORT,
   });
 });
