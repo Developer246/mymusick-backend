@@ -10,21 +10,16 @@ app.use(express.json());
 
 /* ===============================
    ESTADO GLOBAL
-   - ytMusic   : WEB_REMIX  → búsquedas
-   - ytAndroid : ANDROID    → streaming (URLs sin cifrar, no necesita player JS)
 =============================== */
-let ytMusic   = null;
-let ytAndroid = null;
+let ytMusic = null;   // WEB_REMIX  → búsquedas
+let ytTV    = null;   // TV_EMBEDDED → streaming sin cifrado ni player JS
 
 /* ===============================
    INICIALIZACIÓN
 =============================== */
 async function initYT() {
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
-
-  // ANDROID devuelve streaming URLs directas, sin necesidad de descifrar
-  ytAndroid = await Innertube.create({ client_type: "ANDROID" });
-
+  ytTV    = await Innertube.create({ client_type: "TV_EMBEDDED" });
   console.log("✅ Clientes YouTube inicializados");
 }
 
@@ -32,7 +27,7 @@ async function initYT() {
    MIDDLEWARE
 =============================== */
 function requireYT(req, res, next) {
-  if (!ytMusic || !ytAndroid) {
+  if (!ytMusic || !ytTV) {
     return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
   }
   next();
@@ -58,6 +53,24 @@ function durationToSeconds(text = "") {
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   return null;
+}
+
+/* ===============================
+   Extraer URL de audio de streaming_data
+   sin depender de chooseFormat
+=============================== */
+function extractAudioUrl(streamingData) {
+  const formats = [
+    ...(streamingData?.adaptive_formats || []),
+    ...(streamingData?.formats          || []),
+  ];
+
+  // Solo audio, con URL directa, ordenado por bitrate
+  const audioFormats = formats
+    .filter(f => f.mime_type?.includes("audio") && f.url)
+    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+
+  return audioFormats[0] || null;
 }
 
 /* ===============================
@@ -99,8 +112,6 @@ app.get("/search", requireYT, async (req, res) => {
 
 /* ===============================
    GET /stream/:id
-   Cliente ANDROID: devuelve URLs
-   de audio directas, sin cifrado
 =============================== */
 app.get("/stream/:id", requireYT, async (req, res) => {
   const { id } = req.params;
@@ -110,35 +121,23 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    const info = await ytAndroid.getInfo(id);
+    // TV_EMBEDDED no requiere descifrado y acepta la API sin restricciones
+    const info   = await ytTV.getInfo(id);
+    const format = extractAudioUrl(info.streaming_data);
 
-    // Seleccionar mejor formato de audio disponible
-    const format = info.chooseFormat({
-      type:    "audio",
-      quality: "best",
-    });
-
-    if (!format?.url) {
-      // Log para depuración
-      const allFormats = [
+    if (!format) {
+      // Log de depuración
+      const all = [
         ...(info.streaming_data?.adaptive_formats || []),
         ...(info.streaming_data?.formats          || []),
       ];
-      console.error("Formatos disponibles:", allFormats.map(f => ({
-        mime: f.mime_type,
-        bitrate: f.bitrate,
-        hasUrl: !!f.url,
-      })));
+      console.error(`❌ Sin formatos de audio para ${id}. Total formatos: ${all.length}`);
+      all.forEach(f => console.error(`  mime=${f.mime_type} bitrate=${f.bitrate} hasUrl=${!!f.url}`));
+
       return res.status(404).json({ error: "No hay formatos de audio disponibles" });
     }
 
-    // Hacer proxy de la URL directa
-    const upstream = await fetch(format.url, {
-      headers: {
-        // Header necesario para algunas URLs de YouTube
-        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
-      }
-    });
+    const upstream = await fetch(format.url);
 
     if (!upstream.ok) {
       return res.status(502).json({ error: `YouTube respondió con ${upstream.status}` });
@@ -148,7 +147,6 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
 
     const reader = upstream.body.getReader();
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) { res.end(); break; }
@@ -168,10 +166,10 @@ app.get("/stream/:id", requireYT, async (req, res) => {
 =============================== */
 app.get("/health", (req, res) => {
   res.json({
-    status:        "ok",
-    ytMusicReady:  !!ytMusic,
-    ytAndroidReady: !!ytAndroid,
-    port:          PORT,
+    status:       "ok",
+    ytMusicReady: !!ytMusic,
+    ytTVReady:    !!ytTV,
+    port:         PORT,
   });
 });
 
