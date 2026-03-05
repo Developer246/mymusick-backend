@@ -18,8 +18,8 @@ let yt = null;
 =============================== */
 async function initYT() {
   yt = await Innertube.create({
-    client_type: "WEB_REMIX",
-    retrieve_player: true,   // necesario para obtener URLs de stream
+    client_type:      "WEB_REMIX",
+    retrieve_player:  true,
   });
   console.log("✅ YouTube Music inicializado");
 }
@@ -102,10 +102,9 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    // getInfo (no getBasicInfo) resuelve correctamente los formatos y descifra URLs
-    const info = await yt.getInfo(id);
+    // yt.music.getInfo maneja correctamente el formato SingleColumnMusicWatchNextResults
+    const info = await yt.music.getInfo(id);
 
-    // Elegimos el mejor formato de audio usando la API nativa de youtubei.js
     const format = info.chooseFormat({
       type:    "audio",
       quality: "best",
@@ -115,7 +114,6 @@ app.get("/stream/:id", requireYT, async (req, res) => {
       return res.status(404).json({ error: "No hay formatos de audio disponibles" });
     }
 
-    // Obtenemos el stream directamente desde youtubei.js
     const stream = await info.download({
       type:    "audio",
       quality: "best",
@@ -124,18 +122,13 @@ app.get("/stream/:id", requireYT, async (req, res) => {
     res.setHeader("Content-Type",  format.mime_type?.split(";")[0] || "audio/webm");
     res.setHeader("Cache-Control", "no-store");
 
-    // Pipe del ReadableStream de Web Streams API → response de Express
     const reader = stream.getReader();
 
-    const pump = async () => {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) { res.end(); return; }
-        res.write(value);
-      }
-    };
-
-    await pump();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { res.end(); break; }
+      res.write(value);
+    }
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
