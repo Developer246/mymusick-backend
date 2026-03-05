@@ -1,6 +1,6 @@
 const express    = require("express");
 const cors       = require("cors");
-const { spawn }  = require("child_process");
+const ytdl       = require("@distube/ytdl-core");
 const { Innertube } = require("youtubei.js");
 
 const app  = express();
@@ -53,42 +53,6 @@ function durationToSeconds(text = "") {
 }
 
 /* ===============================
-   Obtener URL de audio con yt-dlp
-   Devuelve una Promise<string>
-=============================== */
-function getAudioUrl(videoId) {
-  return new Promise((resolve, reject) => {
-    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-    const proc = spawn("yt-dlp", [
-      "--no-playlist",
-      "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
-      "--get-url",
-      ytUrl,
-    ]);
-
-    let url    = "";
-    let errOut = "";
-
-    proc.stdout.on("data", chunk => { url += chunk.toString(); });
-    proc.stderr.on("data", chunk => { errOut += chunk.toString(); });
-
-    proc.on("close", code => {
-      url = url.trim();
-      if (code === 0 && url) {
-        resolve(url);
-      } else {
-        reject(new Error(errOut.trim() || `yt-dlp salió con código ${code}`));
-      }
-    });
-
-    proc.on("error", err => {
-      reject(new Error(`No se pudo ejecutar yt-dlp: ${err.message}`));
-    });
-  });
-}
-
-/* ===============================
    GET /search
 =============================== */
 app.get("/search", requireYT, async (req, res) => {
@@ -127,24 +91,40 @@ app.get("/search", requireYT, async (req, res) => {
 
 /* ===============================
    GET /stream/:id
-   yt-dlp extrae la URL directa
-   y hacemos proxy del audio
+   @distube/ytdl-core maneja el
+   descifrado de forma nativa
 =============================== */
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
-  if (!id?.match(/^[\w-]{5,20}$/)) {
+  if (!ytdl.validateID(id)) {
     return res.status(400).json({ error: "ID de video inválido" });
   }
 
   try {
-    console.log(`🎵 Obteniendo audio para: ${id}`);
-    const audioUrl = await getAudioUrl(id);
-    console.log(`✅ URL obtenida para: ${id}`);
+    const url  = `https://www.youtube.com/watch?v=${id}`;
+    const info = await ytdl.getInfo(url);
 
-    // Proxy: redirigir al cliente directamente a la URL
-    // (más eficiente que hacer pipe en el servidor)
-    return res.redirect(302, audioUrl);
+    // Elegir el mejor formato de solo audio
+    const format = ytdl.chooseFormat(info.formats, {
+      quality:   "highestaudio",
+      filter:    "audioonly",
+    });
+
+    if (!format) {
+      return res.status(404).json({ error: "No hay formatos de audio disponibles" });
+    }
+
+    res.setHeader("Content-Type",  format.mimeType?.split(";")[0] || "audio/webm");
+    res.setHeader("Cache-Control", "no-store");
+
+    // Pipe directo: ytdl → response
+    ytdl(url, { format })
+      .on("error", err => {
+        console.error("❌ ytdl stream error:", err.message);
+        if (!res.headersSent) res.status(500).end();
+      })
+      .pipe(res);
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
