@@ -1,5 +1,6 @@
-const express = require("express");
-const cors    = require("cors");
+const express    = require("express");
+const cors       = require("cors");
+const { spawn }  = require("child_process");
 const { Innertube } = require("youtubei.js");
 
 const app  = express();
@@ -11,25 +12,21 @@ app.use(express.json());
 /* ===============================
    ESTADO GLOBAL
 =============================== */
-let ytMusic = null;   // WEB_REMIX  → búsquedas
-let ytTV    = null;   // TV_EMBEDDED → streaming sin cifrado ni player JS
+let ytMusic = null;
 
 /* ===============================
    INICIALIZACIÓN
 =============================== */
 async function initYT() {
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
-  ytTV    = await Innertube.create({ client_type: "TV_EMBEDDED" });
-  console.log("✅ Clientes YouTube inicializados");
+  console.log("✅ YouTube Music inicializado");
 }
 
 /* ===============================
    MIDDLEWARE
 =============================== */
 function requireYT(req, res, next) {
-  if (!ytMusic || !ytTV) {
-    return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
-  }
+  if (!ytMusic) return res.status(503).json({ error: "Servidor aún inicializando" });
   next();
 }
 
@@ -56,21 +53,39 @@ function durationToSeconds(text = "") {
 }
 
 /* ===============================
-   Extraer URL de audio de streaming_data
-   sin depender de chooseFormat
+   Obtener URL de audio con yt-dlp
+   Devuelve una Promise<string>
 =============================== */
-function extractAudioUrl(streamingData) {
-  const formats = [
-    ...(streamingData?.adaptive_formats || []),
-    ...(streamingData?.formats          || []),
-  ];
+function getAudioUrl(videoId) {
+  return new Promise((resolve, reject) => {
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Solo audio, con URL directa, ordenado por bitrate
-  const audioFormats = formats
-    .filter(f => f.mime_type?.includes("audio") && f.url)
-    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    const proc = spawn("yt-dlp", [
+      "--no-playlist",
+      "-f", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio",
+      "--get-url",
+      ytUrl,
+    ]);
 
-  return audioFormats[0] || null;
+    let url    = "";
+    let errOut = "";
+
+    proc.stdout.on("data", chunk => { url += chunk.toString(); });
+    proc.stderr.on("data", chunk => { errOut += chunk.toString(); });
+
+    proc.on("close", code => {
+      url = url.trim();
+      if (code === 0 && url) {
+        resolve(url);
+      } else {
+        reject(new Error(errOut.trim() || `yt-dlp salió con código ${code}`));
+      }
+    });
+
+    proc.on("error", err => {
+      reject(new Error(`No se pudo ejecutar yt-dlp: ${err.message}`));
+    });
+  });
 }
 
 /* ===============================
@@ -112,8 +127,10 @@ app.get("/search", requireYT, async (req, res) => {
 
 /* ===============================
    GET /stream/:id
+   yt-dlp extrae la URL directa
+   y hacemos proxy del audio
 =============================== */
-app.get("/stream/:id", requireYT, async (req, res) => {
+app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
   if (!id?.match(/^[\w-]{5,20}$/)) {
@@ -121,42 +138,18 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    // TV_EMBEDDED no requiere descifrado y acepta la API sin restricciones
-    const info   = await ytTV.getInfo(id);
-    const format = extractAudioUrl(info.streaming_data);
+    console.log(`🎵 Obteniendo audio para: ${id}`);
+    const audioUrl = await getAudioUrl(id);
+    console.log(`✅ URL obtenida para: ${id}`);
 
-    if (!format) {
-      // Log de depuración
-      const all = [
-        ...(info.streaming_data?.adaptive_formats || []),
-        ...(info.streaming_data?.formats          || []),
-      ];
-      console.error(`❌ Sin formatos de audio para ${id}. Total formatos: ${all.length}`);
-      all.forEach(f => console.error(`  mime=${f.mime_type} bitrate=${f.bitrate} hasUrl=${!!f.url}`));
-
-      return res.status(404).json({ error: "No hay formatos de audio disponibles" });
-    }
-
-    const upstream = await fetch(format.url);
-
-    if (!upstream.ok) {
-      return res.status(502).json({ error: `YouTube respondió con ${upstream.status}` });
-    }
-
-    res.setHeader("Content-Type",  format.mime_type?.split(";")[0] || "audio/webm");
-    res.setHeader("Cache-Control", "no-store");
-
-    const reader = upstream.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) { res.end(); break; }
-      res.write(value);
-    }
+    // Proxy: redirigir al cliente directamente a la URL
+    // (más eficiente que hacer pipe en el servidor)
+    return res.redirect(302, audioUrl);
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
     if (!res.headersSent) {
-      res.status(500).json({ error: "Error procesando el stream", message: err.message });
+      res.status(500).json({ error: "Error obteniendo audio", message: err.message });
     }
   }
 });
@@ -165,12 +158,7 @@ app.get("/stream/:id", requireYT, async (req, res) => {
    GET /health
 =============================== */
 app.get("/health", (req, res) => {
-  res.json({
-    status:       "ok",
-    ytMusicReady: !!ytMusic,
-    ytTVReady:    !!ytTV,
-    port:         PORT,
-  });
+  res.json({ status: "ok", ytMusicReady: !!ytMusic, port: PORT });
 });
 
 /* ===============================
