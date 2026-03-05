@@ -10,30 +10,29 @@ app.use(express.json());
 
 /* ===============================
    ESTADO GLOBAL
-   - ytMusic : cliente WEB_REMIX  → búsquedas
-   - ytWeb   : cliente WEB        → streaming
+   - ytMusic   : WEB_REMIX  → búsquedas
+   - ytAndroid : ANDROID    → streaming (URLs sin cifrar, no necesita player JS)
 =============================== */
-let ytMusic = null;
-let ytWeb   = null;
+let ytMusic   = null;
+let ytAndroid = null;
 
 /* ===============================
    INICIALIZACIÓN
 =============================== */
 async function initYT() {
-  // Cliente de YouTube Music para búsquedas
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
 
-  // Cliente web estándar para obtener streaming data
-  ytWeb = await Innertube.create({ client_type: "WEB" });
+  // ANDROID devuelve streaming URLs directas, sin necesidad de descifrar
+  ytAndroid = await Innertube.create({ client_type: "ANDROID" });
 
-  console.log("✅ YouTube Music + Web inicializados");
+  console.log("✅ Clientes YouTube inicializados");
 }
 
 /* ===============================
    MIDDLEWARE
 =============================== */
 function requireYT(req, res, next) {
-  if (!ytMusic || !ytWeb) {
+  if (!ytMusic || !ytAndroid) {
     return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
   }
   next();
@@ -100,8 +99,8 @@ app.get("/search", requireYT, async (req, res) => {
 
 /* ===============================
    GET /stream/:id
-   Usa el cliente WEB estándar que sí
-   devuelve streaming_data completo
+   Cliente ANDROID: devuelve URLs
+   de audio directas, sin cifrado
 =============================== */
 app.get("/stream/:id", requireYT, async (req, res) => {
   const { id } = req.params;
@@ -111,26 +110,44 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    const info = await ytWeb.getInfo(id);
+    const info = await ytAndroid.getInfo(id);
 
+    // Seleccionar mejor formato de audio disponible
     const format = info.chooseFormat({
       type:    "audio",
       quality: "best",
     });
 
-    if (!format) {
+    if (!format?.url) {
+      // Log para depuración
+      const allFormats = [
+        ...(info.streaming_data?.adaptive_formats || []),
+        ...(info.streaming_data?.formats          || []),
+      ];
+      console.error("Formatos disponibles:", allFormats.map(f => ({
+        mime: f.mime_type,
+        bitrate: f.bitrate,
+        hasUrl: !!f.url,
+      })));
       return res.status(404).json({ error: "No hay formatos de audio disponibles" });
     }
 
-    const stream = await info.download({
-      type:    "audio",
-      quality: "best",
+    // Hacer proxy de la URL directa
+    const upstream = await fetch(format.url, {
+      headers: {
+        // Header necesario para algunas URLs de YouTube
+        "User-Agent": "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+      }
     });
+
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `YouTube respondió con ${upstream.status}` });
+    }
 
     res.setHeader("Content-Type",  format.mime_type?.split(";")[0] || "audio/webm");
     res.setHeader("Cache-Control", "no-store");
 
-    const reader = stream.getReader();
+    const reader = upstream.body.getReader();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -150,7 +167,12 @@ app.get("/stream/:id", requireYT, async (req, res) => {
    GET /health
 =============================== */
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", ytMusicReady: !!ytMusic, ytWebReady: !!ytWeb, port: PORT });
+  res.json({
+    status:        "ok",
+    ytMusicReady:  !!ytMusic,
+    ytAndroidReady: !!ytAndroid,
+    port:          PORT,
+  });
 });
 
 /* ===============================
