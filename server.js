@@ -14,15 +14,18 @@ app.use(express.json());
 let yt = null;
 
 /* ===============================
-   INICIALIZACIÓN DE YOUTUBE
+   INICIALIZACIÓN
 =============================== */
 async function initYT() {
-  yt = await Innertube.create({ client_type: "WEB_REMIX" });
+  yt = await Innertube.create({
+    client_type: "WEB_REMIX",
+    retrieve_player: true,   // necesario para obtener URLs de stream
+  });
   console.log("✅ YouTube Music inicializado");
 }
 
 /* ===============================
-   MIDDLEWARE — YT listo
+   MIDDLEWARE
 =============================== */
 function requireYT(req, res, next) {
   if (!yt) return res.status(503).json({ error: "Servidor aún inicializando, intenta de nuevo" });
@@ -32,7 +35,6 @@ function requireYT(req, res, next) {
 /* ===============================
    UTILIDADES
 =============================== */
-
 function getBestThumbnail(thumbnails = []) {
   return thumbnails.reduce((best, thumb) => {
     const size     = (thumb.width  || 0) * (thumb.height || 0);
@@ -43,15 +45,6 @@ function getBestThumbnail(thumbnails = []) {
 
 function toHDThumbnail(url = "") {
   return url.replace(/w\d+-h\d+/, "w1080-h1080");
-}
-
-function parseCipher(cipher) {
-  const p   = new URLSearchParams(cipher);
-  const url = p.get("url");
-  const sp  = p.get("sp");
-  const sig = p.get("sig");
-  if (!url || !sp || !sig) throw new Error("Cipher incompleto");
-  return `${url}&${sp}=${sig}`;
 }
 
 function durationToSeconds(text = "") {
@@ -109,52 +102,40 @@ app.get("/stream/:id", requireYT, async (req, res) => {
   }
 
   try {
-    const info = await yt.getBasicInfo(id);
+    // getInfo (no getBasicInfo) resuelve correctamente los formatos y descifra URLs
+    const info = await yt.getInfo(id);
 
-    const formats = [
-      ...(info.streaming_data?.adaptive_formats || []),
-      ...(info.streaming_data?.formats          || []),
-    ];
+    // Elegimos el mejor formato de audio usando la API nativa de youtubei.js
+    const format = info.chooseFormat({
+      type:    "audio",
+      quality: "best",
+    });
 
-    const audio = formats
-      .filter(f => f.mime_type?.includes("audio"))
-      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-
-    if (!audio) {
+    if (!format) {
       return res.status(404).json({ error: "No hay formatos de audio disponibles" });
     }
 
-    if (!audio.url && audio.signatureCipher) {
-      audio.url = parseCipher(audio.signatureCipher);
-    }
+    // Obtenemos el stream directamente desde youtubei.js
+    const stream = await info.download({
+      type:    "audio",
+      quality: "best",
+    });
 
-    if (!audio.url) {
-      return res.status(404).json({ error: "URL de audio no disponible" });
-    }
-
-    const upstream = await fetch(audio.url);
-
-    if (!upstream.ok) {
-      return res.status(502).json({ error: `YouTube respondió con ${upstream.status}` });
-    }
-
-    res.setHeader("Content-Type",  audio.mime_type || "audio/mpeg");
+    res.setHeader("Content-Type",  format.mime_type?.split(";")[0] || "audio/webm");
     res.setHeader("Cache-Control", "no-store");
 
-    const reader = upstream.body.getReader();
+    // Pipe del ReadableStream de Web Streams API → response de Express
+    const reader = stream.getReader();
 
     const pump = async () => {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) { res.end(); break; }
+        if (done) { res.end(); return; }
         res.write(value);
       }
     };
 
-    pump().catch(err => {
-      console.error("❌ Error en pump:", err.message);
-      if (!res.headersSent) res.status(500).end();
-    });
+    await pump();
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -183,4 +164,3 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
-
