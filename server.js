@@ -1,14 +1,15 @@
-const express    = require("express");
-const cors       = require("cors");
-const { spawn }  = require("child_process");
+const express   = require("express");
+const cors      = require("cors");
+const { spawn } = require("child_process");
 const { Innertube } = require("youtubei.js");
-const fs         = require("fs");
-const path       = require("path");
+const fs        = require("fs");
+const path      = require("path");
+const https     = require("https");
 
 const app     = express();
 const PORT    = process.env.PORT || 3000;
-const YTDLP   = path.join(__dirname, "bin", "yt-dlp");
-const COOKIES = path.join(__dirname, "cookies.txt");
+const YTDLP   = path.join("/tmp", "yt-dlp");
+const COOKIES = path.join("/tmp", "cookies.txt");
 
 app.use(cors());
 app.use(express.json());
@@ -20,8 +21,49 @@ let ytMusic     = null;
 let initPromise = null;
 
 /* ===============================
-   ESCRIBIR COOKIES AL DISCO
-   yt-dlp necesita un archivo físico
+   DESCARGAR yt-dlp a /tmp
+   /tmp siempre es escribible en Render
+=============================== */
+function downloadYtDlp() {
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(YTDLP)) {
+      console.log("✅ yt-dlp ya existe en /tmp");
+      return resolve();
+    }
+
+    console.log("⬇️  Descargando yt-dlp...");
+    const url  = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+    const file = fs.createWriteStream(YTDLP);
+
+    const request = (reqUrl) => {
+      https.get(reqUrl, res => {
+        // Seguir redirects
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          return request(res.headers.location);
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`HTTP ${res.statusCode}`));
+        }
+        res.pipe(file);
+        file.on("finish", () => {
+          file.close(() => {
+            fs.chmodSync(YTDLP, 0o755);
+            console.log("✅ yt-dlp descargado y listo");
+            resolve();
+          });
+        });
+      }).on("error", err => {
+        fs.unlink(YTDLP, () => {});
+        reject(err);
+      });
+    };
+
+    request(url);
+  });
+}
+
+/* ===============================
+   ESCRIBIR COOKIES A /tmp
 =============================== */
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
@@ -31,7 +73,7 @@ function writeCookies() {
   }
   try {
     fs.writeFileSync(COOKIES, raw, "utf-8");
-    console.log("🍪 cookies.txt escrito en disco");
+    console.log("🍪 cookies.txt escrito en /tmp");
     return true;
   } catch (err) {
     console.error("❌ Error escribiendo cookies:", err.message);
@@ -68,7 +110,6 @@ function getAudioUrl(videoId) {
       "--get-url",
     ];
 
-    // Usar cookies si existen
     if (fs.existsSync(COOKIES)) {
       args.push("--cookies", COOKIES);
     }
@@ -76,21 +117,21 @@ function getAudioUrl(videoId) {
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
     const proc = spawn(YTDLP, args);
-    let url = "", err = "";
+    let url = "", errOut = "";
 
-    proc.stdout.on("data", d => { url += d.toString(); });
-    proc.stderr.on("data", d => { err += d.toString(); });
+    proc.stdout.on("data", d => { url    += d.toString(); });
+    proc.stderr.on("data", d => { errOut += d.toString(); });
 
     proc.on("close", code => {
       url = url.trim();
       if (code === 0 && url) {
         resolve(url);
       } else {
-        reject(new Error(err.trim() || `yt-dlp código ${code}`));
+        reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
       }
     });
 
-    proc.on("error", e => reject(new Error(`yt-dlp no encontrado: ${e.message}`)));
+    proc.on("error", e => reject(new Error(`yt-dlp error: ${e.message}`)));
   });
 }
 
@@ -212,6 +253,7 @@ app.get("/health", (req, res) => {
 (async () => {
   try {
     writeCookies();
+    await downloadYtDlp();
     await getYTMusic();
     app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
   } catch (err) {
