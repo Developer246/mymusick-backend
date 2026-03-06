@@ -253,8 +253,39 @@ app.get("/stream/:id", async (req, res) => {
   try {
     console.log(`🎵 Obteniendo audio: ${id}`);
     const audioUrl = await getAudioUrl(id);
-    console.log(`✅ Redirect para: ${id}`);
-    res.redirect(302, audioUrl);
+    console.log(`✅ Proxy stream para: ${id}`);
+
+    // Proxy del audio — las URLs de googlevideo están ligadas a la IP del servidor
+    const upstream = await fetch(audioUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)",
+        "Range": req.headers.range || "bytes=0-",
+      }
+    });
+
+    if (!upstream.ok && upstream.status !== 206) {
+      return res.status(upstream.status).json({ error: `upstream ${upstream.status}` });
+    }
+
+    // Pasar headers relevantes al cliente
+    const ct = upstream.headers.get("content-type");
+    const cl = upstream.headers.get("content-length");
+    const cr = upstream.headers.get("content-range");
+
+    if (ct) res.setHeader("Content-Type", ct.split(";")[0]);
+    if (cl) res.setHeader("Content-Length", cl);
+    if (cr) res.setHeader("Content-Range", cr);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-store");
+    res.status(upstream.status === 206 ? 206 : 200);
+
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { res.end(); break; }
+      res.write(value);
+    }
+
   } catch (err) {
     console.error("❌ /stream error:", err.message);
     if (!res.headersSent) {
