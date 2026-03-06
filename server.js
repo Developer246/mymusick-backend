@@ -8,7 +8,7 @@ const https     = require("https");
 
 const app     = express();
 const PORT    = process.env.PORT || 3000;
-const YTDLP   = path.join("/tmp", "yt-dlp");
+const YTDLP   = path.join("/tmp", "yt-dlp_linux");
 const COOKIES = path.join("/tmp", "cookies.txt");
 
 app.use(cors());
@@ -55,7 +55,8 @@ function downloadYtDlp() {
       });
     };
 
-    request("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp");
+    // yt-dlp_linux es binario autocontenido, no requiere Python
+    request("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux");
   });
 }
 
