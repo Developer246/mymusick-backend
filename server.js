@@ -1,84 +1,76 @@
-const express   = require("express");
-const cors      = require("cors");
-const { spawn } = require("child_process");
+const express      = require("express");
+const cors         = require("cors");
+const { spawn }    = require("child_process");
 const { Innertube } = require("youtubei.js");
-const fs        = require("fs");
-const path      = require("path");
-const https     = require("https");
+const fs           = require("fs");
+const path         = require("path");
+const https        = require("https");
 
-const app     = express();
-const PORT    = process.env.PORT || 3000;
-const YTDLP   = path.join("/tmp", "yt-dlp_linux");
-const COOKIES = path.join("/tmp", "cookies.txt");
+const app      = express();
+const PORT     = process.env.PORT || 3000;
+const YTDLP    = path.join("/tmp", "yt-dlp_linux");
+const COOKIES  = path.join("/tmp", "cookies.txt");
 
-app.use(cors());
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",").map(o => o.trim()).filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) callback(null, true);
+    else callback(new Error(`Origen no permitido: ${origin}`));
+  }
+}));
 app.use(express.json());
 
-/* ===============================
-   ESTADO GLOBAL
-=============================== */
 let ytMusic     = null;
 let initPromise = null;
+let oauthTokens = null;
 
-/* ===============================
-   DESCARGAR yt-dlp a /tmp
-=============================== */
+function loadOAuthTokens() {
+  const raw = process.env.YOUTUBE_OAUTH;
+  if (!raw) return null;
+  try {
+    const tokens = JSON.parse(raw);
+    console.log("🔑 OAuth tokens cargados desde YOUTUBE_OAUTH");
+    return tokens;
+  } catch {
+    console.warn("⚠️ YOUTUBE_OAUTH inválido — debe ser JSON");
+    return null;
+  }
+}
+
 function downloadYtDlp() {
   return new Promise((resolve, reject) => {
     if (fs.existsSync(YTDLP)) {
-      console.log("✅ yt-dlp ya existe en /tmp");
+      console.log("✅ yt-dlp ya existe");
       return resolve();
     }
-
     console.log("⬇️  Descargando yt-dlp...");
     const file = fs.createWriteStream(YTDLP);
-
-    const request = (reqUrl) => {
-      https.get(reqUrl, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          return request(res.headers.location);
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode}`));
-        }
+    const request = (url) => {
+      https.get(url, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) return request(res.headers.location);
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
         res.pipe(file);
-        file.on("finish", () => {
-          file.close(() => {
-            fs.chmodSync(YTDLP, 0o755);
-            console.log("✅ yt-dlp listo");
-            resolve();
-          });
-        });
-      }).on("error", err => {
-        fs.unlink(YTDLP, () => {});
-        reject(err);
-      });
+        file.on("finish", () => file.close(() => {
+          fs.chmodSync(YTDLP, 0o755);
+          console.log("✅ yt-dlp listo");
+          resolve();
+        }));
+      }).on("error", err => { fs.unlink(YTDLP, () => {}); reject(err); });
     };
-
-    // yt-dlp_linux es binario autocontenido, no requiere Python
     request("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux");
   });
 }
 
-/* ===============================
-   ESCRIBIR COOKIES A /tmp
-   Render puede escapar los saltos de línea
-   como \n literales — los restauramos
-=============================== */
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
-  if (!raw) {
-    console.warn("⚠️  YOUTUBE_COOKIES no definida");
-    return false;
-  }
+  if (!raw) { console.warn("⚠️ YOUTUBE_COOKIES no definida"); return false; }
   try {
-    // Convertir \n literales a saltos de línea reales
     const content = raw.replace(/\\n/g, "\n");
     fs.writeFileSync(COOKIES, content, "utf-8");
-
     const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#"));
-    console.log(`🍪 ${lines.length} cookies escritas en /tmp`);
-    console.log(`🍪 Primera línea de datos: ${lines[0]?.substring(0, 60)}...`);
+    console.log(`🍪 ${lines.length} cookies escritas`);
     return true;
   } catch (err) {
     console.error("❌ Error escribiendo cookies:", err.message);
@@ -86,67 +78,57 @@ function writeCookies() {
   }
 }
 
-/* ===============================
-   INICIALIZAR INNERTUBE
-=============================== */
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    ytMusic     = await Innertube.create({ client_type: "WEB_REMIX" });
+    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
+
+    if (oauthTokens) {
+      try {
+        yt.session.oauth.setupCredentials(oauthTokens);
+        yt.session.oauth.on("update-credentials", ({ credentials }) => {
+          oauthTokens = credentials;
+          console.log("🔄 OAuth renovado — actualiza YOUTUBE_OAUTH con:");
+          console.log(JSON.stringify(credentials));
+        });
+        await yt.session.oauth.refreshIfNeeded();
+        console.log("✅ Innertube listo con OAuth");
+      } catch (e) {
+        console.warn("⚠️ OAuth falló, usando sin auth:", e.message);
+      }
+    } else {
+      console.log("✅ Innertube listo (sin OAuth)");
+    }
+
+    ytMusic     = yt;
     initPromise = null;
-    console.log("✅ Innertube listo");
     return ytMusic;
   })();
 
   return initPromise;
 }
 
-/* ===============================
-   OBTENER URL DE AUDIO CON yt-dlp
-=============================== */
 function getAudioUrl(videoId) {
   return new Promise((resolve, reject) => {
-    const args = [
-      "--no-playlist",
-      "--no-warnings",
-      "-f", "bestaudio/best",
-      "--get-url",
-    ];
-
-    if (fs.existsSync(COOKIES)) {
-      args.push("--cookies", COOKIES);
-      console.log(`🍪 Pasando cookies a yt-dlp: ${COOKIES}`);
-    } else {
-      console.warn("⚠️  Sin cookies para yt-dlp");
-    }
-
+    const args = ["--no-playlist", "--no-warnings", "-f", "bestaudio/best", "--get-url"];
+    if (fs.existsSync(COOKIES)) args.push("--cookies", COOKIES);
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
-    console.log(`▶ yt-dlp ${args.join(" ")}`);
 
     const proc = spawn(YTDLP, args);
     let url = "", errOut = "";
-
     proc.stdout.on("data", d => { url    += d.toString(); });
     proc.stderr.on("data", d => { errOut += d.toString(); });
-
     proc.on("close", code => {
       url = url.trim();
-      if (code === 0 && url) {
-        resolve(url);
-      } else {
-        reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
-      }
+      if (code === 0 && url) resolve(url);
+      else reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
     });
-
     proc.on("error", e => reject(new Error(`yt-dlp error: ${e.message}`)));
   });
 }
 
-/* ===============================
-   UTILIDADES
-=============================== */
 function getBestThumbnail(thumbnails = []) {
   return thumbnails.reduce((best, thumb) => {
     const size     = (thumb.width  || 0) * (thumb.height || 0);
@@ -155,9 +137,7 @@ function getBestThumbnail(thumbnails = []) {
   }, null);
 }
 
-function toHDThumbnail(url = "") {
-  return url.replace(/w\d+-h\d+/, "w1080-h1080");
-}
+function toHDThumbnail(url = "") { return url.replace(/w\d+-h\d+/, "w1080-h1080"); }
 
 function durationToSeconds(text = "") {
   const parts = text.split(":").map(Number);
@@ -166,9 +146,51 @@ function durationToSeconds(text = "") {
   return null;
 }
 
-/* ===============================
-   GET /search
-=============================== */
+app.get("/auth", async (req, res) => {
+  try {
+    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
+    let responded = false;
+
+    yt.session.oauth.on("auth-pending", (deviceCode) => {
+      console.log(`\n🔑 Ve a: ${deviceCode.verification_url}`);
+      console.log(`🔑 Ingresa el código: ${deviceCode.user_code}\n`);
+      if (!responded) {
+        responded = true;
+        res.json({
+          message:    "Abre esta URL en tu navegador e ingresa el código",
+          url:        deviceCode.verification_url,
+          code:       deviceCode.user_code,
+          expires_in: deviceCode.expires_in
+        });
+      }
+    });
+
+    yt.session.oauth.on("auth", ({ credentials }) => {
+      oauthTokens = credentials;
+      ytMusic     = null;
+      console.log("\n✅ OAuth completado. Guarda esto en YOUTUBE_OAUTH en Railway:");
+      console.log(JSON.stringify(credentials));
+    });
+
+    yt.session.oauth.on("auth-error", (err) => {
+      console.error("❌ OAuth error:", err);
+    });
+
+    yt.session.signIn().catch(err => console.error("signIn error:", err));
+
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/auth/status", (req, res) => {
+  res.json({
+    authenticated:    !!oauthTokens,
+    has_access_token: !!(oauthTokens?.access_token),
+    expires:          oauthTokens?.expiry_date || null
+  });
+});
+
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -176,60 +198,46 @@ app.get("/search", async (req, res) => {
 
     const t0 = Date.now();
     let yt;
-
-    try {
-      yt = await getYTMusic();
-    } catch {
-      return res.status(503).json({ error: "Servicio no disponible" });
-    }
+    try { yt = await getYTMusic(); }
+    catch { return res.status(503).json({ error: "Servicio no disponible" }); }
 
     let search;
-    try {
-      search = await yt.music.search(q, { type: "song" });
-    } catch {
+    try { search = await yt.music.search(q, { type: "song" }); }
+    catch {
       ytMusic = null;
       yt      = await getYTMusic();
       search  = await yt.music.search(q, { type: "song" });
     }
 
-    // youtubei.js v16 puede anidar los resultados en distintos niveles
     let items = [];
-
     for (const section of (search.contents || [])) {
-      // Nivel directo
       if (Array.isArray(section?.contents)) {
         const found = section.contents.filter(i => i?.videoId || i?.id);
         if (found.length) { items = found; break; }
-      }
-      // Nivel anidado (MusicShelf, etc.)
-      if (Array.isArray(section?.contents)) {
         for (const sub of section.contents) {
           if (Array.isArray(sub?.contents)) {
-            const found = sub.contents.filter(i => i?.videoId || i?.id);
-            if (found.length) { items = found; break; }
+            const found2 = sub.contents.filter(i => i?.videoId || i?.id);
+            if (found2.length) { items = found2; break; }
           }
         }
       }
       if (items.length) break;
     }
 
-    console.log(`📦 Items encontrados: ${items.length}`);
     if (!items.length) return res.json([]);
 
-    const songs = items
-      .slice(0, 10)
-      .map(item => {
-        const thumb = getBestThumbnail(item.thumbnails);
-        return {
-          id:        item.videoId || item.id,
-          title:     item.name   || item.title || "Sin título",
-          artist:    item.artists?.map(a => a.name).join(", ") || "Desconocido",
-          album:     item.album?.name  || null,
-          duration:  item.duration?.text || null,
-          seconds:   item.duration?.text ? durationToSeconds(item.duration.text) : null,
-          thumbnail: thumb ? toHDThumbnail(thumb.url) : null,
-        };
-      });
+    const songs = items.slice(0, 10).map(item => {
+      const thumb = getBestThumbnail(item.thumbnails);
+      return {
+        id:        item.videoId || item.id,
+        title:     item.name   || item.title || "Sin título",
+        artist:    item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album:     item.album?.name  || null,
+        duration:  item.duration?.text || null,
+        seconds:   item.duration?.text ? durationToSeconds(item.duration.text) : null,
+        thumbnail: thumb ? toHDThumbnail(thumb.url) : null,
+      };
+    });
 
     console.log(`🔍 "${q}" → ${songs.length} resultados en ${Date.now() - t0}ms`);
     res.json(songs);
@@ -240,22 +248,14 @@ app.get("/search", async (req, res) => {
   }
 });
 
-/* ===============================
-   GET /stream/:id
-=============================== */
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
-
-  if (!id?.match(/^[\w-]{5,20}$/)) {
-    return res.status(400).json({ error: "ID inválido" });
-  }
+  if (!id?.match(/^[\w-]{5,20}$/)) return res.status(400).json({ error: "ID inválido" });
 
   try {
-    console.log(`🎵 Obteniendo audio: ${id}`);
+    console.log(`🎵 Stream: ${id}`);
     const audioUrl = await getAudioUrl(id);
-    console.log(`✅ Proxy stream para: ${id}`);
 
-    // Proxy del audio — las URLs de googlevideo están ligadas a la IP del servidor
     const upstream = await fetch(audioUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)",
@@ -267,7 +267,6 @@ app.get("/stream/:id", async (req, res) => {
       return res.status(upstream.status).json({ error: `upstream ${upstream.status}` });
     }
 
-    // Pasar headers relevantes al cliente
     const ct = upstream.headers.get("content-type");
     const cl = upstream.headers.get("content-length");
     const cr = upstream.headers.get("content-range");
@@ -288,39 +287,34 @@ app.get("/stream/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Error obteniendo audio", message: err.message });
-    }
+    if (!res.headersSent) res.status(500).json({ error: "Error obteniendo audio", message: err.message });
   }
 });
 
-/* ===============================
-   GET /health
-=============================== */
 app.get("/health", (req, res) => {
-  const cookieContent = fs.existsSync(COOKIES)
+  const cookieLines = fs.existsSync(COOKIES)
     ? fs.readFileSync(COOKIES, "utf-8").split("\n").filter(l => l.trim() && !l.startsWith("#")).length
     : 0;
-
   res.json({
     status:       "ok",
     ytReady:      !!ytMusic,
+    oauthLoaded:  !!oauthTokens,
     ytdlpExists:  fs.existsSync(YTDLP),
     cookiesExist: fs.existsSync(COOKIES),
-    cookieLines:  cookieContent,
+    cookieLines,
     port:         PORT,
   });
 });
 
-/* ===============================
-   ARRANQUE
-=============================== */
 (async () => {
   try {
+    oauthTokens = loadOAuthTokens();
     writeCookies();
     await downloadYtDlp();
-    await getYTMusic();
-    app.listen(PORT, () => console.log(`🚀 Servidor en puerto ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`🚀 Servidor en puerto ${PORT}`);
+      getYTMusic().catch(err => console.warn("⚠️ Innertube init falló:", err.message));
+    });
   } catch (err) {
     console.error("❌ Error arrancando:", err);
     process.exit(1);
