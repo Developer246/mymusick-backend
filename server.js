@@ -151,34 +151,35 @@ app.get("/auth", async (req, res) => {
     const yt = await Innertube.create({ client_type: "WEB_REMIX" });
     let responded = false;
 
-    yt.session.oauth.on("auth-pending", (deviceCode) => {
-      console.log(`\n🔑 Ve a: ${deviceCode.verification_url}`);
-      console.log(`🔑 Ingresa el código: ${deviceCode.user_code}\n`);
+    yt.session.on("auth-pending", (data) => {
+      console.log(`\n🔑 Ve a: ${data.verification_url}`);
+      console.log(`🔑 Código: ${data.user_code}\n`);
       if (!responded) {
         responded = true;
         res.json({
-          message:    "Abre esta URL en tu navegador e ingresa el código",
-          url:        deviceCode.verification_url,
-          code:       deviceCode.user_code,
-          expires_in: deviceCode.expires_in
+          message: "Abre esta URL e ingresa el código",
+          url:     data.verification_url,
+          code:    data.user_code
         });
       }
     });
 
-    yt.session.oauth.on("auth", ({ credentials }) => {
+    yt.session.on("auth", ({ credentials }) => {
       oauthTokens = credentials;
       ytMusic     = null;
-      console.log("\n✅ OAuth completado. Guarda esto en YOUTUBE_OAUTH en Railway:");
+      console.log("\n✅ OAuth completado. Guarda en YOUTUBE_OAUTH:");
       console.log(JSON.stringify(credentials));
     });
 
-    yt.session.oauth.on("auth-error", (err) => {
-      console.error("❌ OAuth error:", err);
+    yt.session.on("update-credentials", ({ credentials }) => {
+      oauthTokens = credentials;
+      console.log("🔄 Tokens renovados:", JSON.stringify(credentials));
     });
 
-    yt.session.signIn().catch(err => console.error("signIn error:", err));
+    await yt.session.signIn();
 
   } catch (err) {
+    console.error("❌ /auth error:", err.message);
     if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
