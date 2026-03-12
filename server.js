@@ -271,7 +271,12 @@ app.get("/stream/:id", async (req, res) => {
     // Intentar con youtubei.js primero (funciona con OAuth en datacenter)
     try {
       const yt = await getYTMusic();
-      const info = await yt.getInfo(id);
+      let info;
+      try {
+        info = await yt.music.getInfo(id);
+      } catch {
+        info = await yt.getInfo(id);
+      }
       const format = info.chooseFormat({ type: "audio", quality: "best" });
       if (format?.url) {
         audioUrl = format.url;
