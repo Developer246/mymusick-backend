@@ -87,13 +87,15 @@ async function getYTMusic() {
 
     if (oauthTokens) {
       try {
-        yt.session.oauth.setupCredentials(oauthTokens);
-        yt.session.oauth.on("update-credentials", ({ credentials }) => {
+        await yt.session.oauth.init(oauthTokens);
+        yt.session.oauth.setTokens(oauthTokens);
+        yt.session.on("update-credentials", ({ credentials }) => {
           oauthTokens = credentials;
-          console.log("🔄 OAuth renovado — actualiza YOUTUBE_OAUTH con:");
-          console.log(JSON.stringify(credentials));
+          console.log("🔄 OAuth renovado:", JSON.stringify(credentials));
         });
-        await yt.session.oauth.refreshIfNeeded();
+        if (yt.session.oauth.shouldRefreshToken()) {
+          await yt.session.oauth.refreshAccessToken();
+        }
         console.log("✅ Innertube listo con OAuth");
       } catch (e) {
         console.warn("⚠️ OAuth falló, usando sin auth:", e.message);
