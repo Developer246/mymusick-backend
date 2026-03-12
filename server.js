@@ -265,7 +265,27 @@ app.get("/stream/:id", async (req, res) => {
 
   try {
     console.log(`🎵 Stream: ${id}`);
-    const audioUrl = await getAudioUrl(id);
+
+    let audioUrl = null;
+
+    // Intentar con youtubei.js primero (funciona con OAuth en datacenter)
+    try {
+      const yt = await getYTMusic();
+      const info = await yt.getInfo(id);
+      const format = info.chooseFormat({ type: "audio", quality: "best" });
+      if (format?.url) {
+        audioUrl = format.url;
+        console.log("✅ URL obtenida via youtubei.js");
+      }
+    } catch (e) {
+      console.warn("⚠️ youtubei.js falló, intentando yt-dlp:", e.message);
+    }
+
+    // Fallback a yt-dlp
+    if (!audioUrl) {
+      audioUrl = await getAudioUrl(id);
+      console.log("✅ URL obtenida via yt-dlp");
+    }
 
     const upstream = await fetch(audioUrl, {
       headers: {
