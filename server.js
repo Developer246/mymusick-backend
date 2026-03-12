@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 // --- Configuración de Binarios según SO ---
 const OS = os.platform();
 const YTDLP_NAME = OS === "win32" ? "yt-dlp.exe" : (OS === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
+// Render usa Linux, pero usamos /tmp que es writable
 const YTDLP = path.join("/tmp", YTDLP_NAME);
 const COOKIES = path.join("/tmp", "cookies.txt");
 
@@ -66,9 +67,14 @@ function downloadYtDlp() {
         res.pipe(file);
         file.on("finish", () => {
           file.close(() => {
-            fs.chmodSync(YTDLP, 0o755);
-            console.log("✅ yt-dlp listo");
-            resolve();
+            try {
+              fs.chmodSync(YTDLP, 0o755);
+              console.log("✅ yt-dlp listo");
+              resolve();
+            } catch (err) {
+              console.error("❌ Error al hacer chmod:", err.message);
+              reject(err);
+            }
           });
         });
       }).on("error", err => { 
@@ -100,30 +106,35 @@ async function getYTMusic() {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
+    try {
+      const yt = await Innertube.create({ client_type: "WEB_REMIX" });
 
-    if (oauthTokens) {
-      try {
-        await yt.session.oauth.init(oauthTokens);
-        yt.session.oauth.setTokens(oauthTokens);
-        yt.session.on("update-credentials", ({ credentials }) => {
-          oauthTokens = credentials;
-          console.log("🔄 Tokens renovados:", JSON.stringify(credentials));
-        });
-        if (yt.session.oauth.shouldRefreshToken()) {
-          await yt.session.oauth.refreshAccessToken();
+      if (oauthTokens) {
+        try {
+          await yt.session.oauth.init(oauthTokens);
+          yt.session.oauth.setTokens(oauthTokens);
+          yt.session.on("update-credentials", ({ credentials }) => {
+            oauthTokens = credentials;
+            console.log("🔄 Tokens renovados");
+          });
+          if (yt.session.oauth.shouldRefreshToken()) {
+            await yt.session.oauth.refreshAccessToken();
+          }
+          console.log("✅ Innertube listo con OAuth");
+        } catch (e) {
+          console.warn("⚠️ OAuth falló, usando sin auth:", e.message);
         }
-        console.log("✅ Innertube listo con OAuth");
-      } catch (e) {
-        console.warn("⚠️ OAuth falló, usando sin auth:", e.message);
+      } else {
+        console.log("✅ Innertube listo (sin OAuth)");
       }
-    } else {
-      console.log("✅ Innertube listo (sin OAuth)");
-    }
 
-    ytMusic = yt;
-    initPromise = null;
-    return ytMusic;
+      ytMusic = yt;
+      initPromise = null;
+      return ytMusic;
+    } catch (err) {
+      console.error("❌ Innertube init error:", err.message);
+      throw err;
+    }
   })();
 
   return initPromise;
@@ -140,16 +151,23 @@ function getAudioUrl(videoId) {
 
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
-    const proc = spawn(YTDLP, args);
+    const proc = spawn(YTDLP, args, {
+      timeout: 30000, // 30 segundos timeout
+      maxBuffer: 1024 * 1024 // 1MB max buffer
+    });
+    
     let url = "", errOut = "";
     proc.stdout.on("data", d => { url += d.toString(); });
     proc.stderr.on("data", d => { errOut += d.toString(); });
+    
     proc.on("close", code => {
       url = url.trim();
       if (code === 0 && url) resolve(url);
       else reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
     });
+    
     proc.on("error", e => reject(new Error(`yt-dlp error: ${e.message}`)));
+    proc.on("timeout", () => reject(new Error("yt-dlp timeout")));
   });
 }
 
@@ -210,8 +228,6 @@ app.get("/auth", async (req, res) => {
   }
 });
 
-// app.get("/debug", async (req, res) => { ... }); // Recomendado eliminar en producción
-
 app.get("/auth/status", (req, res) => {
   res.json({
     authenticated: !!oauthTokens,
@@ -238,7 +254,6 @@ app.get("/search", async (req, res) => {
       search = await yt.music.search(q, { type: "song" });
     }
 
-    // Recursión más segura para encontrar items
     const findItems = (contents) => {
       if (!contents) return [];
       for (const section of contents) {
@@ -289,7 +304,8 @@ app.get("/stream/:id", async (req, res) => {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)",
         "Range": req.headers.range || "bytes=0-",
-      }
+      },
+      timeout: 30000 // 30 segundos timeout
     });
 
     if (!upstream.ok && upstream.status !== 206) {
@@ -309,14 +325,12 @@ app.get("/stream/:id", async (req, res) => {
 
     const reader = upstream.body.getReader();
     
-    // Manejo de Backpressure
     const pump = async () => {
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) { res.end(); break; }
           if (!res.write(value)) {
-            // Esperar a que el cliente pueda recibir más datos
             await new Promise(resolve => res.once('drain', resolve));
           }
         }
