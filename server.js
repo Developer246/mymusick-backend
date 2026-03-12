@@ -116,12 +116,7 @@ function getAudioUrl(videoId) {
   return new Promise((resolve, reject) => {
     const args = ["--no-playlist", "--no-warnings", "-f", "bestaudio/best", "--get-url"];
 
-    const accessToken = oauthTokens?.access_token;
-    if (accessToken) {
-      args.push("--username", "oauth2", "--password", "");
-      args.push("--add-header", `Authorization:Bearer ${accessToken}`);
-      console.log("🔑 yt-dlp usando OAuth token");
-    } else if (fs.existsSync(COOKIES)) {
+    if (fs.existsSync(COOKIES)) {
       args.push("--cookies", COOKIES);
       console.log("🍪 yt-dlp usando cookies");
     }
@@ -279,31 +274,7 @@ app.get("/stream/:id", async (req, res) => {
   try {
     console.log(`🎵 Stream: ${id}`);
 
-    let audioUrl = null;
-
-    // Intentar con youtubei.js primero (funciona con OAuth en datacenter)
-    try {
-      const yt = await getYTMusic();
-      let info;
-      try {
-        info = await yt.music.getInfo(id);
-      } catch {
-        info = await yt.getInfo(id);
-      }
-      const format = info.chooseFormat({ type: "audio", quality: "best" });
-      if (format?.url) {
-        audioUrl = format.url;
-        console.log("✅ URL obtenida via youtubei.js");
-      }
-    } catch (e) {
-      console.warn("⚠️ youtubei.js falló, intentando yt-dlp:", e.message);
-    }
-
-    // Fallback a yt-dlp
-    if (!audioUrl) {
-      audioUrl = await getAudioUrl(id);
-      console.log("✅ URL obtenida via yt-dlp");
-    }
+    const audioUrl = await getAudioUrl(id);
 
     const upstream = await fetch(audioUrl, {
       headers: {
