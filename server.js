@@ -1,16 +1,22 @@
-const express      = require("express");
-const cors         = require("cors");
-const { spawn }    = require("child_process");
+const express = require("express");
+const cors = require("cors");
+const { spawn } = require("child_process");
 const { Innertube } = require("youtubei.js");
-const fs           = require("fs");
-const path         = require("path");
-const https        = require("https");
+const fs = require("fs");
+const path = require("path");
+const https = require("https");
+const os = require("os");
 
-const app      = express();
-const PORT     = process.env.PORT || 3000;
-const YTDLP    = path.join("/tmp", "yt-dlp_linux");
-const COOKIES  = path.join("/tmp", "cookies.txt");
+const app = express();
+const PORT = process.env.PORT || 3000;
 
+// --- Configuración de Binarios según SO ---
+const OS = os.platform();
+const YTDLP_NAME = OS === "win32" ? "yt-dlp.exe" : (OS === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
+const YTDLP = path.join("/tmp", YTDLP_NAME);
+const COOKIES = path.join("/tmp", "cookies.txt");
+
+// --- Configuración CORS ---
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .split(",").map(o => o.trim()).filter(Boolean);
 
@@ -22,9 +28,11 @@ app.use(cors({
 }));
 app.use(express.json());
 
-let ytMusic     = null;
+let ytMusic = null;
 let initPromise = null;
 let oauthTokens = null;
+
+// --- Utilidades ---
 
 function loadOAuthTokens() {
   const raw = process.env.YOUTUBE_OAUTH;
@@ -45,21 +53,30 @@ function downloadYtDlp() {
       console.log("✅ yt-dlp ya existe");
       return resolve();
     }
-    console.log("⬇️  Descargando yt-dlp...");
+    console.log(`⬇️  Descargando yt-dlp para ${OS}...`);
     const file = fs.createWriteStream(YTDLP);
-    const request = (url) => {
-      https.get(url, res => {
-        if (res.statusCode === 301 || res.statusCode === 302) return request(res.headers.location);
+    const url = `https://github.com/yt-dlp/yt-dlp/releases/latest/download/${YTDLP_NAME}`;
+    
+    const request = (targetUrl) => {
+      https.get(targetUrl, res => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          return request(res.headers.location);
+        }
         if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
         res.pipe(file);
-        file.on("finish", () => file.close(() => {
-          fs.chmodSync(YTDLP, 0o755);
-          console.log("✅ yt-dlp listo");
-          resolve();
-        }));
-      }).on("error", err => { fs.unlink(YTDLP, () => {}); reject(err); });
+        file.on("finish", () => {
+          file.close(() => {
+            fs.chmodSync(YTDLP, 0o755);
+            console.log("✅ yt-dlp listo");
+            resolve();
+          });
+        });
+      }).on("error", err => { 
+        fs.unlink(YTDLP, () => {}); 
+        reject(err); 
+      });
     };
-    request("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux");
+    request(url);
   });
 }
 
@@ -91,7 +108,7 @@ async function getYTMusic() {
         yt.session.oauth.setTokens(oauthTokens);
         yt.session.on("update-credentials", ({ credentials }) => {
           oauthTokens = credentials;
-          console.log("🔄 OAuth renovado:", JSON.stringify(credentials));
+          console.log("🔄 Tokens renovados:", JSON.stringify(credentials));
         });
         if (yt.session.oauth.shouldRefreshToken()) {
           await yt.session.oauth.refreshAccessToken();
@@ -104,7 +121,7 @@ async function getYTMusic() {
       console.log("✅ Innertube listo (sin OAuth)");
     }
 
-    ytMusic     = yt;
+    ytMusic = yt;
     initPromise = null;
     return ytMusic;
   })();
@@ -125,7 +142,7 @@ function getAudioUrl(videoId) {
 
     const proc = spawn(YTDLP, args);
     let url = "", errOut = "";
-    proc.stdout.on("data", d => { url    += d.toString(); });
+    proc.stdout.on("data", d => { url += d.toString(); });
     proc.stderr.on("data", d => { errOut += d.toString(); });
     proc.on("close", code => {
       url = url.trim();
@@ -138,8 +155,8 @@ function getAudioUrl(videoId) {
 
 function getBestThumbnail(thumbnails = []) {
   return thumbnails.reduce((best, thumb) => {
-    const size     = (thumb.width  || 0) * (thumb.height || 0);
-    const bestSize = (best?.width  || 0) * (best?.height || 0);
+    const size = (thumb.width || 0) * (thumb.height || 0);
+    const bestSize = (best?.width || 0) * (best?.height || 0);
     return size > bestSize ? thumb : best;
   }, null);
 }
@@ -153,6 +170,8 @@ function durationToSeconds(text = "") {
   return null;
 }
 
+// --- Endpoints ---
+
 app.get("/auth", async (req, res) => {
   try {
     const yt = await Innertube.create({ client_type: "WEB_REMIX" });
@@ -165,15 +184,15 @@ app.get("/auth", async (req, res) => {
         responded = true;
         res.json({
           message: "Abre esta URL e ingresa el código",
-          url:     data.verification_url,
-          code:    data.user_code
+          url: data.verification_url,
+          code: data.user_code
         });
       }
     });
 
     yt.session.on("auth", ({ credentials }) => {
       oauthTokens = credentials;
-      ytMusic     = null;
+      ytMusic = null;
       console.log("\n✅ OAuth completado. Guarda en YOUTUBE_OAUTH:");
       console.log(JSON.stringify(credentials));
     });
@@ -191,22 +210,13 @@ app.get("/auth", async (req, res) => {
   }
 });
 
-app.get("/debug", async (req, res) => {
-  try {
-    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
-    const oauthKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(yt.session.oauth));
-    const sessionKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(yt.session));
-    res.json({ oauth_methods: oauthKeys, session_methods: sessionKeys });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// app.get("/debug", async (req, res) => { ... }); // Recomendado eliminar en producción
 
 app.get("/auth/status", (req, res) => {
   res.json({
-    authenticated:    !!oauthTokens,
+    authenticated: !!oauthTokens,
     has_access_token: !!(oauthTokens?.access_token),
-    expires:          oauthTokens?.expiry_date || null
+    expires: oauthTokens?.expiry_date || null
   });
 });
 
@@ -224,36 +234,36 @@ app.get("/search", async (req, res) => {
     try { search = await yt.music.search(q, { type: "song" }); }
     catch {
       ytMusic = null;
-      yt      = await getYTMusic();
-      search  = await yt.music.search(q, { type: "song" });
+      yt = await getYTMusic();
+      search = await yt.music.search(q, { type: "song" });
     }
 
-    let items = [];
-    for (const section of (search.contents || [])) {
-      if (Array.isArray(section?.contents)) {
-        const found = section.contents.filter(i => i?.videoId || i?.id);
-        if (found.length) { items = found; break; }
-        for (const sub of section.contents) {
-          if (Array.isArray(sub?.contents)) {
-            const found2 = sub.contents.filter(i => i?.videoId || i?.id);
-            if (found2.length) { items = found2; break; }
-          }
+    // Recursión más segura para encontrar items
+    const findItems = (contents) => {
+      if (!contents) return [];
+      for (const section of contents) {
+        if (Array.isArray(section?.contents)) {
+          const found = section.contents.filter(i => i?.videoId || i?.id);
+          if (found.length) return found;
+          const subFound = findItems(section.contents);
+          if (subFound.length) return subFound;
         }
       }
-      if (items.length) break;
-    }
+      return [];
+    };
 
+    let items = findItems(search.contents);
     if (!items.length) return res.json([]);
 
     const songs = items.slice(0, 10).map(item => {
       const thumb = getBestThumbnail(item.thumbnails);
       return {
-        id:        item.videoId || item.id,
-        title:     item.name   || item.title || "Sin título",
-        artist:    item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album:     item.album?.name  || null,
-        duration:  item.duration?.text || null,
-        seconds:   item.duration?.text ? durationToSeconds(item.duration.text) : null,
+        id: item.videoId || item.id,
+        title: item.name || item.title || "Sin título",
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: item.album?.name || null,
+        duration: item.duration?.text || null,
+        seconds: item.duration?.text ? durationToSeconds(item.duration.text) : null,
         thumbnail: thumb ? toHDThumbnail(thumb.url) : null,
       };
     });
@@ -273,7 +283,6 @@ app.get("/stream/:id", async (req, res) => {
 
   try {
     console.log(`🎵 Stream: ${id}`);
-
     const audioUrl = await getAudioUrl(id);
 
     const upstream = await fetch(audioUrl, {
@@ -299,11 +308,25 @@ app.get("/stream/:id", async (req, res) => {
     res.status(upstream.status === 206 ? 206 : 200);
 
     const reader = upstream.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) { res.end(); break; }
-      res.write(value);
-    }
+    
+    // Manejo de Backpressure
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { res.end(); break; }
+          if (!res.write(value)) {
+            // Esperar a que el cliente pueda recibir más datos
+            await new Promise(resolve => res.once('drain', resolve));
+          }
+        }
+      } catch (err) {
+        console.error("❌ Error en stream:", err.message);
+        res.end();
+      }
+    };
+    
+    pump();
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -316,16 +339,17 @@ app.get("/health", (req, res) => {
     ? fs.readFileSync(COOKIES, "utf-8").split("\n").filter(l => l.trim() && !l.startsWith("#")).length
     : 0;
   res.json({
-    status:       "ok",
-    ytReady:      !!ytMusic,
-    oauthLoaded:  !!oauthTokens,
-    ytdlpExists:  fs.existsSync(YTDLP),
+    status: "ok",
+    ytReady: !!ytMusic,
+    oauthLoaded: !!oauthTokens,
+    ytdlpExists: fs.existsSync(YTDLP),
     cookiesExist: fs.existsSync(COOKIES),
     cookieLines,
-    port:         PORT,
+    port: PORT,
   });
 });
 
+// --- Inicialización ---
 (async () => {
   try {
     oauthTokens = loadOAuthTokens();
