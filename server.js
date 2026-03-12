@@ -13,9 +13,9 @@ const PORT = process.env.PORT || 3000;
 // --- Configuración de Binarios según SO ---
 const OS = os.platform();
 const YTDLP_NAME = OS === "win32" ? "yt-dlp.exe" : (OS === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
-// Render usa Linux, pero usamos /tmp que es writable
-const YTDLP = path.join("/tmp", YTDLP_NAME);
-const COOKIES = path.join("/tmp", "cookies.txt");
+// Usa el directorio del proyecto en lugar de /tmp (mejor para Render)
+const YTDLP = path.join(process.cwd(), YTDLP_NAME);
+const COOKIES = path.join(process.cwd(), "cookies.txt");
 
 // --- Configuración CORS ---
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
@@ -88,12 +88,35 @@ function downloadYtDlp() {
 
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
-  if (!raw) { console.warn("⚠️ YOUTUBE_COOKIES no definida"); return false; }
+  if (!raw) { 
+    console.warn("⚠️ YOUTUBE_COOKIES no definida"); 
+    return false; 
+  }
   try {
-    const content = raw.replace(/\\n/g, "\n");
+    // Limpiar y corregir formato
+    let content = raw.replace(/^"|"$/g, ''); // Quitar comillas externas
+    content = content.replace(/\\n/g, "\n"); // Convertir \n a salto real
+    content = content.replace(/\r\n/g, "\n"); // Normalizar saltos de línea
+    
+    // CORREGIR DOMINIO: .youtube.com → www.youtube.com
+    content = content.replace(/\.youtube\.com/g, "www.youtube.com");
+    
     fs.writeFileSync(COOKIES, content, "utf-8");
+    
     const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#"));
     console.log(`🍪 ${lines.length} cookies escritas`);
+    
+    // Verificar cookies críticas
+    const has3PSID = lines.some(l => l.includes("__Secure-3PSID"));
+    const has1PSIDTVC = lines.some(l => l.includes("__Secure-1PSIDTVC"));
+    
+    console.log(`🔑 __Secure-3PSID: ${has3PSID ? "✅" : "❌"}`);
+    console.log(`🔑 __Secure-1PSIDTVC: ${has1PSIDTVC ? "✅" : "❌"}`);
+    
+    if (!has3PSID || !has1PSIDTVC) {
+      console.warn("⚠️ Faltan cookies críticas de autenticación");
+    }
+    
     return true;
   } catch (err) {
     console.error("❌ Error escribiendo cookies:", err.message);
@@ -110,22 +133,19 @@ async function getYTMusic() {
       const yt = await Innertube.create({ client_type: "WEB_REMIX" });
 
       if (oauthTokens) {
-        try {
-          await yt.session.oauth.init(oauthTokens);
-          yt.session.oauth.setTokens(oauthTokens);
-          yt.session.on("update-credentials", ({ credentials }) => {
-            oauthTokens = credentials;
-            console.log("🔄 Tokens renovados");
-          });
-          if (yt.session.oauth.shouldRefreshToken()) {
-            await yt.session.oauth.refreshAccessToken();
-          }
-          console.log("✅ Innertube listo con OAuth");
-        } catch (e) {
-          console.warn("⚠️ OAuth falló, usando sin auth:", e.message);
+        console.log("🔑 Usando OAuth para Innertube");
+        await yt.session.oauth.init(oauthTokens);
+        yt.session.oauth.setTokens(oauthTokens);
+        yt.session.on("update-credentials", ({ credentials }) => {
+          oauthTokens = credentials;
+          console.log("🔄 Tokens renovados");
+        });
+        if (yt.session.oauth.shouldRefreshToken()) {
+          await yt.session.oauth.refreshAccessToken();
         }
+        console.log("✅ Innertube listo con OAuth");
       } else {
-        console.log("✅ Innertube listo (sin OAuth)");
+        console.log("⚠️ Innertube listo (sin OAuth)");
       }
 
       ytMusic = yt;
@@ -146,14 +166,17 @@ function getAudioUrl(videoId) {
 
     if (fs.existsSync(COOKIES)) {
       args.push("--cookies", COOKIES);
-      console.log("🍪 yt-dlp usando cookies");
+      console.log("🍪 yt-dlp usando cookies:", COOKIES);
+      console.log("🍪 Cookie file size:", fs.statSync(COOKIES).size, "bytes");
+    } else {
+      console.warn("⚠️ No se encontraron cookies en:", COOKIES);
     }
 
     args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
     const proc = spawn(YTDLP, args, {
-      timeout: 30000, // 30 segundos timeout
-      maxBuffer: 1024 * 1024 // 1MB max buffer
+      timeout: 30000,
+      maxBuffer: 1024 * 1024
     });
     
     let url = "", errOut = "";
@@ -162,8 +185,13 @@ function getAudioUrl(videoId) {
     
     proc.on("close", code => {
       url = url.trim();
-      if (code === 0 && url) resolve(url);
-      else reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
+      if (code === 0 && url) {
+        console.log("✅ URL obtenida:", url.substring(0, 50) + "...");
+        resolve(url);
+      } else {
+        console.error("❌ yt-dlp error:", errOut);
+        reject(new Error(errOut.trim() || `yt-dlp código ${code}`));
+      }
     });
     
     proc.on("error", e => reject(new Error(`yt-dlp error: ${e.message}`)));
@@ -305,7 +333,7 @@ app.get("/stream/:id", async (req, res) => {
         "User-Agent": "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)",
         "Range": req.headers.range || "bytes=0-",
       },
-      timeout: 30000 // 30 segundos timeout
+      timeout: 30000
     });
 
     if (!upstream.ok && upstream.status !== 206) {
