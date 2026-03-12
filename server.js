@@ -194,6 +194,17 @@ app.get("/auth", async (req, res) => {
   }
 });
 
+app.get("/debug", async (req, res) => {
+  try {
+    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
+    const oauthKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(yt.session.oauth));
+    const sessionKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(yt.session));
+    res.json({ oauth_methods: oauthKeys, session_methods: sessionKeys });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/auth/status", (req, res) => {
   res.json({
     authenticated:    !!oauthTokens,
