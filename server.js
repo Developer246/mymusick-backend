@@ -87,11 +87,15 @@ function downloadYtDlp() {
 
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
+  
   if (!raw) { 
     console.warn("⚠️ YOUTUBE_COOKIES no definida"); 
     return false; 
   }
+  
   try {
+    console.log("📝 Procesando cookies...");
+    
     // Limpiar y corregir formato
     let content = raw.replace(/^"|"$/g, ''); // Quitar comillas externas
     content = content.replace(/\\n/g, "\n"); // Convertir \n a salto real
@@ -100,15 +104,24 @@ function writeCookies() {
     // CORREGIR DOMINIO: .youtube.com → www.youtube.com
     content = content.replace(/\.youtube\.com/g, "www.youtube.com");
     
-    // FILTRAR COOKIES: Eliminar LOGIN_INFO y otras problemáticas
+    // Separar líneas y filtrar
     const lines = content.split("\n")
       .filter(l => l.trim() && !l.startsWith("#"))
       .filter(l => !l.includes("LOGIN_INFO")); // Eliminar LOGIN_INFO
+    
+    console.log(`📊 Líneas originales: ${content.split("\n").filter(l => l.trim() && !l.startsWith("#")).length}`);
+    console.log(`📊 Líneas filtradas: ${lines.length}`);
+    
+    if (lines.length === 0) {
+      console.error("❌ No hay cookies válidas después de filtrar");
+      return false;
+    }
     
     const cleanedContent = lines.join("\n");
     fs.writeFileSync(COOKIES, cleanedContent, "utf-8");
     
     console.log(`🍪 ${lines.length} cookies escritas (LOGIN_INFO eliminado)`);
+    console.log(`📁 Cookie file size: ${fs.statSync(COOKIES).size} bytes`);
     
     // Verificar cookies críticas
     const has3PSID = lines.some(l => l.includes("__Secure-3PSID"));
@@ -169,9 +182,14 @@ function getAudioUrl(videoId) {
     const args = ["--no-playlist", "--no-warnings", "-f", "bestaudio/best", "--get-url"];
 
     if (fs.existsSync(COOKIES)) {
-      args.push("--cookies", COOKIES);
-      console.log("🍪 yt-dlp usando cookies:", COOKIES);
-      console.log("🍪 Cookie file size:", fs.statSync(COOKIES).size, "bytes");
+      const cookieSize = fs.statSync(COOKIES).size;
+      if (cookieSize > 0) {
+        args.push("--cookies", COOKIES);
+        console.log("🍪 yt-dlp usando cookies:", COOKIES);
+        console.log("🍪 Cookie file size:", cookieSize, "bytes");
+      } else {
+        console.warn("⚠️ Cookie file existe pero está vacío, omitiendo");
+      }
     } else {
       console.warn("⚠️ No se encontraron cookies en:", COOKIES);
     }
