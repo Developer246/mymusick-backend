@@ -13,7 +13,6 @@ const PORT = process.env.PORT || 3000;
 // --- Configuración de Binarios según SO ---
 const OS = os.platform();
 const YTDLP_NAME = OS === "win32" ? "yt-dlp.exe" : (OS === "darwin" ? "yt-dlp_macos" : "yt-dlp_linux");
-// Usa el directorio del proyecto en lugar de /tmp (mejor para Render)
 const YTDLP = path.join(process.cwd(), YTDLP_NAME);
 const COOKIES = path.join(process.cwd(), "cookies.txt");
 
@@ -101,10 +100,15 @@ function writeCookies() {
     // CORREGIR DOMINIO: .youtube.com → www.youtube.com
     content = content.replace(/\.youtube\.com/g, "www.youtube.com");
     
-    fs.writeFileSync(COOKIES, content, "utf-8");
+    // FILTRAR COOKIES: Eliminar LOGIN_INFO y otras problemáticas
+    const lines = content.split("\n")
+      .filter(l => l.trim() && !l.startsWith("#"))
+      .filter(l => !l.includes("LOGIN_INFO")); // Eliminar LOGIN_INFO
     
-    const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#"));
-    console.log(`🍪 ${lines.length} cookies escritas`);
+    const cleanedContent = lines.join("\n");
+    fs.writeFileSync(COOKIES, cleanedContent, "utf-8");
+    
+    console.log(`🍪 ${lines.length} cookies escritas (LOGIN_INFO eliminado)`);
     
     // Verificar cookies críticas
     const has3PSID = lines.some(l => l.includes("__Secure-3PSID"));
