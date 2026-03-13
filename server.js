@@ -63,11 +63,29 @@ function downloadYtDlp() {
   });
 }
 
+// 🔧 Nueva versión: soporta texto plano y base64
 function writeCookies() {
   const raw = process.env.YOUTUBE_COOKIES;
-  if (!raw) { console.warn("⚠️ YOUTUBE_COOKIES no definida"); return false; }
+  const rawBase64 = process.env.YOUTUBE_COOKIES_BASE64;
+
+  let content;
+  if (rawBase64) {
+    try {
+      content = Buffer.from(rawBase64, "base64").toString("utf-8");
+      console.log("🍪 cookies cargadas desde BASE64");
+    } catch (err) {
+      console.error("❌ Error decodificando base64:", err.message);
+      return false;
+    }
+  } else if (raw) {
+    content = raw.replace(/\\n/g, "\n");
+    console.log("🍪 cookies cargadas desde texto plano");
+  } else {
+    console.warn("⚠️ YOUTUBE_COOKIES no definida");
+    return false;
+  }
+
   try {
-    const content = raw.replace(/\\n/g, "\n");
     fs.writeFileSync(COOKIES, content, "utf-8");
     const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#"));
     console.log(`🍪 ${lines.length} cookies escritas`);
@@ -77,6 +95,7 @@ function writeCookies() {
     return false;
   }
 }
+
 
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
