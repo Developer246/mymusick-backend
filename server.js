@@ -79,7 +79,7 @@ app.get("/search", async (req, res) => {
 // 🎵 Stream directo
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
-  if (!id?.match(/^[\\w-]{5,20}$/)) return res.status(400).json({ error: "ID inválido" });
+  if (!id?.match(/^[A-Za-z0-9_-]{6,15}$/)) return res.status(400).json({ error: "ID inválido" });
 
   try {
     const yt = await getYTMusic();
