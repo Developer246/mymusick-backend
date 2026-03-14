@@ -5,33 +5,16 @@ const { Innertube } = require("youtubei.js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
-  .split(",").map(o => o.trim()).filter(Boolean);
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) callback(null, true);
-    else callback(new Error(`Origen no permitido: ${origin}`));
-  }
-}));
+app.use(cors());
 app.use(express.json());
 
 let ytMusic = null;
-let initPromise = null;
 
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
-  if (initPromise) return initPromise;
-
-  initPromise = (async () => {
-    const yt = await Innertube.create({ client_type: "WEB_REMIX" });
-    console.log("✅ Innertube listo (sin OAuth ni cookies)");
-    ytMusic = yt;
-    initPromise = null;
-    return ytMusic;
-  })();
-
-  return initPromise;
+  ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
+  console.log("✅ Innertube listo");
+  return ytMusic;
 }
 
 function getBestThumbnail(thumbnails = []) {
@@ -43,7 +26,7 @@ function getBestThumbnail(thumbnails = []) {
 }
 
 function toHDThumbnail(url = "") {
-  return url.replace(/w\d+-h\d+/, "w1080-h1080");
+  return url.replace(/w\\d+-h\\d+/, "w1080-h1080");
 }
 
 function durationToSeconds(text = "") {
@@ -93,15 +76,20 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream directo usando youtubei.js
+// 🎵 Stream directo
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
-  if (!id?.match(/^[\w-]{5,20}$/)) return res.status(400).json({ error: "ID inválido" });
+  if (!id?.match(/^[\\w-]{5,20}$/)) return res.status(400).json({ error: "ID inválido" });
 
   try {
     const yt = await getYTMusic();
-    const info = await yt.getBasicInfo(id); // ✅ más seguro que getInfo
-    const audioFormat = info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio"));
+    const info = await yt.getBasicInfo(id);
+
+    // Buscar audio en adaptive_formats o formats
+    const audioFormat =
+      info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
+      info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
+
     if (!audioFormat) return res.status(404).json({ error: "No se encontró audio" });
 
     const audioUrl = audioFormat.url;
@@ -160,4 +148,3 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
-
