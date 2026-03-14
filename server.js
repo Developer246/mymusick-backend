@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
-const ytdl = require("@distube/ytdl-core");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,7 +10,7 @@ app.use(express.json());
 
 let ytMusic = null;
 
-// Inicializa cliente de YouTube Music
+// Inicializa cliente de YouTube Music para búsquedas
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
@@ -79,33 +78,25 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Endpoint de streaming con ytdl-core
+// 🎵 Stream usando Piped API (evita bloqueos de YouTube)
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
-    console.log(`🎵 Stream: ${id}`);
-    const stream = ytdl(id, { quality: "highestaudio" });
+    // Llamada al backend público de Piped
+    const resp = await fetch(`https://pipedapi.kavin.rocks/streams/${id}`);
+    if (!resp.ok) {
+      return res.status(resp.status).json({ error: "Error en Piped API" });
+    }
 
-    // Configurar headers correctos cuando se obtiene info
-    stream.on("info", (info, format) => {
-      res.setHeader("Content-Type", format.mimeType || "audio/webm");
-      if (format.contentLength) {
-        res.setHeader("Content-Length", format.contentLength);
-      }
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Accept-Ranges", "bytes");
-    });
+    const data = await resp.json();
+    const audio = data.audioStreams?.[0]?.url;
 
-    stream.pipe(res);
+    if (!audio) return res.status(404).json({ error: "No se encontró audio" });
 
-    stream.on("error", (err) => {
-      console.error("❌ ytdl error:", err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: "Error obteniendo audio", message: err.message });
-      }
-    });
+    // Redirige directamente al stream de audio
+    res.redirect(audio);
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -117,11 +108,7 @@ app.get("/stream/:id", async (req, res) => {
 
 // 🩺 Health check
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    ytReady: !!ytMusic,
-    port: PORT,
-  });
+  res.json({ status: "ok", ytReady: !!ytMusic, port: PORT });
 });
 
 // Arranque
