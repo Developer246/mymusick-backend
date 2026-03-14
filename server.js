@@ -76,9 +76,9 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream probando varios clientes
+// 🎵 Stream usando cliente WEB/TV_EMBEDDED
 async function getAudioUrl(videoId) {
-  const clients = ["WEB", "ANDROID", "IOS", "TV_EMBEDDED"];
+  const clients = ["WEB", "TV_EMBEDDED"];
   for (const client of clients) {
     try {
       const yt = await Innertube.create({ client_type: client });
