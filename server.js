@@ -13,7 +13,7 @@ let ytMusic = null;
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
-  console.log("✅ Innertube listo");
+  console.log("✅ Innertube listo para búsquedas");
   return ytMusic;
 }
 
@@ -76,16 +76,15 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream directo
+// 🎵 Stream usando cliente ANDROID (sin cookies)
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
-  if (!id?.match(/^[A-Za-z0-9_-]{6,15}$/)) return res.status(400).json({ error: "ID inválido" });
+  if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
-    const yt = await getYTMusic();
+    const yt = await Innertube.create({ client_type: "ANDROID" });
     const info = await yt.getBasicInfo(id);
 
-    // Buscar audio en adaptive_formats o formats
     const audioFormat =
       info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
       info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
@@ -148,3 +147,4 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
+
