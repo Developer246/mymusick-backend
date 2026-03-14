@@ -11,6 +11,7 @@ app.use(express.json());
 
 let ytMusic = null;
 
+// Inicializa cliente de YouTube Music
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
@@ -18,6 +19,7 @@ async function getYTMusic() {
   return ytMusic;
 }
 
+// Helpers
 function getBestThumbnail(thumbnails = []) {
   return thumbnails.reduce((best, thumb) => {
     const size = (thumb.width || 0) * (thumb.height || 0);
@@ -37,7 +39,7 @@ function durationToSeconds(text = "") {
   return null;
 }
 
-// 🔍 Buscar canciones
+// 🔍 Endpoint de búsqueda
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -77,27 +79,39 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream usando ytdl-core (sin cookies)
+// 🎵 Endpoint de streaming con ytdl-core
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
     console.log(`🎵 Stream: ${id}`);
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.setHeader("Cache-Control", "no-store");
-
     const stream = ytdl(id, { quality: "highestaudio" });
+
+    // Configurar headers correctos cuando se obtiene info
+    stream.on("info", (info, format) => {
+      res.setHeader("Content-Type", format.mimeType || "audio/webm");
+      if (format.contentLength) {
+        res.setHeader("Content-Length", format.contentLength);
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Accept-Ranges", "bytes");
+    });
+
     stream.pipe(res);
 
     stream.on("error", (err) => {
       console.error("❌ ytdl error:", err.message);
-      if (!res.headersSent) res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+      }
     });
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
-    if (!res.headersSent) res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+    }
   }
 });
 
@@ -110,6 +124,7 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Arranque
 (async () => {
   try {
     await getYTMusic();
@@ -121,4 +136,3 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
-
