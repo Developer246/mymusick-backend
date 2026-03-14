@@ -76,22 +76,37 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream usando cliente ANDROID (sin cookies)
+// 🎵 Stream probando varios clientes
+async function getAudioUrl(videoId) {
+  const clients = ["WEB", "ANDROID", "IOS", "TV_EMBEDDED"];
+  for (const client of clients) {
+    try {
+      const yt = await Innertube.create({ client_type: client });
+      const info = await yt.getBasicInfo(videoId);
+
+      const audioFormat =
+        info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
+        info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
+
+      if (audioFormat?.url) {
+        console.log(`✅ Audio encontrado con cliente ${client}`);
+        return audioFormat.url;
+      }
+    } catch (err) {
+      console.warn(`⚠️ Cliente ${client} falló: ${err.message}`);
+    }
+  }
+  return null;
+}
+
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
-    const yt = await Innertube.create({ client_type: "ANDROID" });
-    const info = await yt.getBasicInfo(id);
+    const audioUrl = await getAudioUrl(id);
+    if (!audioUrl) return res.status(404).json({ error: "No se encontró audio" });
 
-    const audioFormat =
-      info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
-      info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
-
-    if (!audioFormat) return res.status(404).json({ error: "No se encontró audio" });
-
-    const audioUrl = audioFormat.url;
     const upstream = await fetch(audioUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0",
@@ -147,4 +162,3 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
-
