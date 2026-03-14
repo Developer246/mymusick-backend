@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
+const ytdl = require("ytdl-core");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -76,65 +77,23 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream usando cliente WEB/TV_EMBEDDED
-async function getAudioUrl(videoId) {
-  const clients = ["WEB", "TV_EMBEDDED"];
-  for (const client of clients) {
-    try {
-      const yt = await Innertube.create({ client_type: client });
-      const info = await yt.getBasicInfo(videoId);
-
-      const audioFormat =
-        info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio")) ||
-        info.streaming_data?.formats?.find(f => f.mime_type.includes("audio"));
-
-      if (audioFormat?.url) {
-        console.log(`✅ Audio encontrado con cliente ${client}`);
-        return audioFormat.url;
-      }
-    } catch (err) {
-      console.warn(`⚠️ Cliente ${client} falló: ${err.message}`);
-    }
-  }
-  return null;
-}
-
+// 🎵 Stream usando ytdl-core (sin cookies)
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
-    const audioUrl = await getAudioUrl(id);
-    if (!audioUrl) return res.status(404).json({ error: "No se encontró audio" });
-
-    const upstream = await fetch(audioUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Range": req.headers.range || "bytes=0-",
-      }
-    });
-
-    if (!upstream.ok && upstream.status !== 206) {
-      return res.status(upstream.status).json({ error: `upstream ${upstream.status}` });
-    }
-
-    const ct = upstream.headers.get("content-type");
-    const cl = upstream.headers.get("content-length");
-    const cr = upstream.headers.get("content-range");
-
-    if (ct) res.setHeader("Content-Type", ct.split(";")[0]);
-    if (cl) res.setHeader("Content-Length", cl);
-    if (cr) res.setHeader("Content-Range", cr);
-    res.setHeader("Accept-Ranges", "bytes");
+    console.log(`🎵 Stream: ${id}`);
+    res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.status(upstream.status === 206 ? 206 : 200);
 
-    const reader = upstream.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) { res.end(); break; }
-      res.write(value);
-    }
+    const stream = ytdl(id, { quality: "highestaudio" });
+    stream.pipe(res);
+
+    stream.on("error", (err) => {
+      console.error("❌ ytdl error:", err.message);
+      if (!res.headersSent) res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+    });
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -162,3 +121,4 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
+
