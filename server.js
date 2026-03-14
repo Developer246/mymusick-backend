@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { Innertube } = require("youtubei.js");
+const ytdl = require("ytdl-core");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,7 +11,7 @@ app.use(express.json());
 
 let ytMusic = null;
 
-// Inicializa cliente de YouTube Music para búsquedas
+// Inicializa cliente de YouTube Music
 async function getYTMusic() {
   if (ytMusic) return ytMusic;
   ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
@@ -78,25 +79,41 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Stream usando Piped API (evita bloqueos de YouTube)
+// 🎵 Stream con ytdl-core normal
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID requerido" });
 
   try {
-    // Llamada al backend público de Piped
-    const resp = await fetch(`https://pipedapi.kavin.rocks/streams/${id}`);
-    if (!resp.ok) {
-      return res.status(resp.status).json({ error: "Error en Piped API" });
-    }
+    console.log(`🎵 Stream: ${id}`);
 
-    const data = await resp.json();
-    const audio = data.audioStreams?.[0]?.url;
+    const stream = ytdl(id, {
+      quality: "highestaudio",
+      requestOptions: {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          "Accept-Language": "en-US,en;q=0.9"
+        }
+      }
+    });
 
-    if (!audio) return res.status(404).json({ error: "No se encontró audio" });
+    stream.on("info", (info, format) => {
+      res.setHeader("Content-Type", format.mimeType || "audio/webm");
+      if (format.contentLength) {
+        res.setHeader("Content-Length", format.contentLength);
+      }
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Accept-Ranges", "bytes");
+    });
 
-    // Redirige directamente al stream de audio
-    res.redirect(audio);
+    stream.pipe(res);
+
+    stream.on("error", (err) => {
+      console.error("❌ ytdl error:", err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error obteniendo audio", message: err.message });
+      }
+    });
 
   } catch (err) {
     console.error("❌ /stream error:", err.message);
@@ -106,7 +123,11 @@ app.get("/stream/:id", async (req, res) => {
   }
 });
 
-// 🩺 Health check
+// 🩺 Health check y raíz
+app.get("/", (req, res) => {
+  res.send("Backend funcionando 🚀");
+});
+
 app.get("/health", (req, res) => {
   res.json({ status: "ok", ytReady: !!ytMusic, port: PORT });
 });
