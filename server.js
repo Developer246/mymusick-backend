@@ -100,7 +100,7 @@ app.get("/stream/:id", async (req, res) => {
 
   try {
     const yt = await getYTMusic();
-    const info = await yt.getInfo(id);
+    const info = await yt.getBasicInfo(id); // ✅ más seguro que getInfo
     const audioFormat = info.streaming_data?.adaptive_formats?.find(f => f.mime_type.includes("audio"));
     if (!audioFormat) return res.status(404).json({ error: "No se encontró audio" });
 
@@ -160,3 +160,4 @@ app.get("/health", (req, res) => {
     process.exit(1);
   }
 })();
+
