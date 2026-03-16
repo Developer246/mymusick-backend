@@ -56,22 +56,31 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con validación y manejo de errores
-app.get("/stream/:id", async (req, res, next) => {
+// 🎵 Streaming de audio con validación y fallback
+app.get("/stream/:id", async (req, res) => {
   try {
     const { id } = req.params;
     if (!id || !ytdl.validateID(id)) {
-      return res.status(400).json({ 
-        error: "Stream fallido", 
-        message: "ID inválido o requerido", 
-        code: 400 
+      return res.status(400).json({
+        error: "Stream fallido",
+        message: "ID inválido o requerido",
+        code: 400
       });
     }
 
-    // Verifica si hay formatos de audio disponibles
-    const info = await ytdl.getInfo(id);
-    const audioFormats = ytdl.filterFormats(info.formats, "audioonly");
+    let info;
+    try {
+      info = await ytdl.getInfo(id);
+    } catch (err) {
+      console.error("❌ Error getInfo:", err);
+      return res.status(500).json({
+        error: "Stream fallido",
+        message: "No se pudo obtener información del video",
+        code: 500
+      });
+    }
 
+    const audioFormats = ytdl.filterFormats(info.formats, "audioonly");
     if (!audioFormats.length) {
       return res.status(410).json({
         error: "Stream no disponible",
@@ -80,7 +89,6 @@ app.get("/stream/:id", async (req, res, next) => {
       });
     }
 
-    // Usa el mejor formato de audio disponible
     const stream = ytdl(id, {
       filter: "audioonly",
       quality: "highestaudio"
