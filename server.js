@@ -10,8 +10,6 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-
-// Puerto del servidor POT (bgutil-ytdlp-pot-provider)
 const POT_SERVER = process.env.POT_SERVER || "http://127.0.0.1:4416";
 
 app.use(cors());
@@ -22,15 +20,15 @@ app.use(helmet());
 let ytClient = null;
 let youtubedl = null;
 
-// ✅ Inicializar youtube-dl-exec
+// ✅ Inicializar yt-dlp
 async function initYoutubeDl() {
   if (youtubedl) return youtubedl;
 
   const binaryPaths = [
     process.env.YTDLP_PATH,
     "/usr/local/bin/yt-dlp",
-    path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
     "/usr/bin/yt-dlp",
+    path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
   ].filter(Boolean);
 
   for (const binPath of binaryPaths) {
@@ -108,8 +106,9 @@ app.get("/stream/:id", async (req, res) => {
 
     const url = `https://www.youtube.com/watch?v=${id}`;
 
-    // PO Token provider activo en localhost:4416
-    // yt-dlp lo usa automáticamente via extractor-args
+    // El plugin bgutil-ytdlp-pot-provider detecta automáticamente
+    // el servidor POT en localhost:4416 — no hace falta extractor-args
+    // si el servidor está en el puerto por defecto
     const info = await youtubedl(url, {
       dumpSingleJson: true,
       noWarnings: true,
@@ -117,10 +116,9 @@ app.get("/stream/:id", async (req, res) => {
       preferFreeFormats: true,
       format: "bestaudio/best",
       noPlaylist: true,
-      extractorArgs: `youtubepot-bgutilhttp:base_url=${POT_SERVER}`,
     });
 
-    // Extraer mejor URL de solo audio
+    // Mejor formato de solo audio
     const audioFormat = info.formats
       ?.filter((f) => f.acodec !== "none" && f.vcodec === "none" && f.url)
       ?.sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0];
