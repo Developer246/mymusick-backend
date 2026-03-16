@@ -7,7 +7,7 @@ const { Innertube } = require("youtubei.js");
 const YTDlpWrap = require("yt-dlp-wrap").default;
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 app.use(cors());
 app.use(express.json());
@@ -70,7 +70,8 @@ app.get("/stream/:id", (req, res) => {
 
   const url = `https://www.youtube.com/watch?v=${id}`;
 
-  const stream = ytDlpWrap.exec([
+  // yt-dlp-wrap devuelve un ChildProcess con stdout
+  const child = ytDlpWrap.exec([
     "-f", "bestaudio",
     "-o", "-",
     url
@@ -80,9 +81,9 @@ app.get("/stream/:id", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Accept-Ranges", "bytes");
 
-  stream.stdout.pipe(res);
+  child.stdout.pipe(res);
 
-  stream.on("error", err => {
+  child.on("error", err => {
     console.error("❌ Error en yt-dlp:", err);
     res.status(500).json({
       error: "Stream fallido",
@@ -91,7 +92,7 @@ app.get("/stream/:id", (req, res) => {
     });
   });
 
-  stream.on("close", code => {
+  child.on("close", code => {
     if (code !== 0) {
       console.error(`yt-dlp terminó con código ${code}`);
     }
@@ -125,5 +126,3 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 })();
-
-
