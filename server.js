@@ -23,7 +23,7 @@ app.use(
   })
 );
 
-let ytClient = null;
+let ytClient  = null;
 let youtubedl = null;
 
 // ✅ Inicializar yt-dlp
@@ -63,13 +63,15 @@ async function getYT() {
   return ytClient;
 }
 
-// ✅ Obtener miniatura con fallback
+// Obtener la miniatura de mayor resolución usando la URL directa de YouTube
+// maxresdefault (1280x720) > hqdefault (480x360) > mqdefault (320x180)
 function getBestThumbnail(id) {
   if (!id) return null;
+  // maxresdefault es la mayor calidad disponible en YouTube
   return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
 }
 
-// ✅ Cache de URLs de audio
+// Cache de URLs de audio (las URLs de YouTube duran ~6 horas)
 const urlCache = new Map();
 const CACHE_TTL = 5 * 60 * 60 * 1000;
 
@@ -80,14 +82,17 @@ async function getAudioUrl(id) {
   await initYoutubeDl();
   const url = `https://www.youtube.com/watch?v=${id}`;
 
+  // Construir el extractor-args como string para evitar problemas de escape
+  const potArg = "youtubepot-bgutilhttp:base_url=" + POT_SERVER;
+  console.log("🔑 Usando POT arg:", potArg);
+
   const info = await youtubedl(url, {
     dumpSingleJson: true,
-    noWarnings: true,
     noCheckCertificates: true,
     preferFreeFormats: true,
     format: "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
     noPlaylist: true,
-    extractorArgs: `youtubepot-bgutilhttp:base_url=${POT_SERVER}`,
+    extractorArgs: potArg,
   });
 
   const audioFormat = info.formats
@@ -106,7 +111,7 @@ async function getAudioUrl(id) {
   return entry;
 }
 
-// ✅ Helper para GET JSON
+// Helper para hacer GET a una URL y retornar JSON
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const parsed   = new URL(url);
@@ -158,6 +163,7 @@ app.get("/search", async (req, res, next) => {
         artist: i.artists?.map((a) => a.name).join(", ") || "Desconocido",
         album: i.album?.name || null,
         duration: i.duration?.text || null,
+        // Usar ID del video para construir URL maxresdefault directamente
         thumbnail: getBestThumbnail(i.id || i.video_id),
       }));
 
@@ -167,7 +173,7 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con soporte Range
+// 🎵 Streaming de audio con soporte completo de Range
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
@@ -177,7 +183,7 @@ app.get("/stream/:id", async (req, res) => {
 
     const ytHeaders = {
       "User-Agent": httpHeaders["User-Agent"] ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Accept": "*/*",
       "Accept-Language": "en-US,en;q=0.9",
       "Accept-Encoding": "identity",
@@ -215,10 +221,18 @@ app.get("/stream/:id", async (req, res) => {
 
       if (ytRes.headers["content-range"]) {
         headers["Content-Range"] = ytRes.headers["content-range"];
+      } else if (filesize && rangeHeader) {
+        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (match) {
+          const start = parseInt(match[1]);
+          const end   = match[2] ? parseInt(match[2]) : filesize - 1;
+          headers["Content-Range"] = `bytes ${start}-${end}/${filesize}`;
+        }
       }
 
       res.writeHead(status, headers);
       ytRes.pipe(res);
+      ytRes.on("error", (e) => console.error(`❌ Pipe error ${id}:`, e.message));
     });
 
     ytReq.on("error", (err) => {
@@ -241,7 +255,7 @@ app.get("/stream/:id", async (req, res) => {
   }
 });
 
-// 🎤 Letras de canciones
+// 🎤 Letras de canciones via simpmusic API
 app.get("/lyrics/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
