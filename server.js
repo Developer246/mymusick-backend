@@ -4,7 +4,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
-const { spawn } = require("child_process");
+const YTDlpWrap = require("yt-dlp-wrap").default;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +15,7 @@ app.use(morgan("dev"));
 app.use(helmet());
 
 let ytMusic = null;
+const ytDlpWrap = new YTDlpWrap();
 
 // Inicializa cliente de YouTube Music
 async function getYTMusic() {
@@ -55,9 +56,8 @@ app.get("/search", async (req, res, next) => {
     next(err);
   }
 });
-const YTDlpWrap = require("yt-dlp-wrap").default;
-const ytDlpWrap = new YTDlpWrap();
-// 🎵 Streaming de audio usando yt-dlp
+
+// 🎵 Streaming de audio usando yt-dlp-wrap
 app.get("/stream/:id", (req, res) => {
   const { id } = req.params;
   if (!id) {
@@ -70,10 +70,9 @@ app.get("/stream/:id", (req, res) => {
 
   const url = `https://www.youtube.com/watch?v=${id}`;
 
-  // Ejecuta yt-dlp para obtener el mejor audio disponible
-  const ytdlp = spawn("yt-dlp", [
+  const stream = ytDlpWrap.exec([
     "-f", "bestaudio",
-    "-o", "-", // salida estándar
+    "-o", "-",
     url
   ]);
 
@@ -81,13 +80,9 @@ app.get("/stream/:id", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Accept-Ranges", "bytes");
 
-  ytdlp.stdout.pipe(res);
+  stream.stdout.pipe(res);
 
-  ytdlp.stderr.on("data", data => {
-    console.error("yt-dlp error:", data.toString());
-  });
-
-  ytdlp.on("error", err => {
+  stream.on("error", err => {
     console.error("❌ Error en yt-dlp:", err);
     res.status(500).json({
       error: "Stream fallido",
@@ -96,7 +91,7 @@ app.get("/stream/:id", (req, res) => {
     });
   });
 
-  ytdlp.on("close", code => {
+  stream.on("close", code => {
     if (code !== 0) {
       console.error(`yt-dlp terminó con código ${code}`);
     }
@@ -130,4 +125,5 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 })();
+
 
