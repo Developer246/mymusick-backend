@@ -1,13 +1,12 @@
 {
   "name": "mymusick-backend",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "YouTube Music Backend API",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "install-yt-dlp": "yt-dlp-wrap download-latest-binary",
     "health": "curl -s http://localhost:8080/health | jq"
   },
   "dependencies": {
@@ -36,8 +35,3 @@
     "yt-dlp"
   ]
 }
-
-
-
-
-
