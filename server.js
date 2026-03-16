@@ -5,6 +5,8 @@ const morgan = require("morgan");
 const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
 const YTDlpWrap = require("yt-dlp-wrap").default;
+const path = require("path");
+const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -15,7 +17,32 @@ app.use(morgan("dev"));
 app.use(helmet());
 
 let ytMusic = null;
-const ytDlpWrap = new YTDlpWrap();
+let ytDlpWrap = null;
+
+// ✅ Verificar e inicializar yt-dlp
+async function initYTDlp() {
+  if (ytDlpWrap) return ytDlpWrap;
+  
+  try {
+    ytDlpWrap = new YTDlpWrap();
+    
+    // Verificar si yt-dlp existe
+    await ytDlpWrap.getVersion();
+    console.log("✅ yt-dlp listo");
+    return ytDlpWrap;
+  } catch (err) {
+    console.error("❌ yt-dlp no encontrado. Instalando...");
+    
+    // Intentar auto-instalar yt-dlp
+    try {
+      await ytDlpWrap.downloadLatestBinary();
+      console.log("✅ yt-dlp instalado automáticamente");
+      return ytDlpWrap;
+    } catch (installErr) {
+      throw new Error(`yt-dlp no disponible: ${installErr.message}. Instálalo con: pip install yt-dlp`);
+    }
+  }
+}
 
 // Inicializa cliente de YouTube Music
 async function getYTMusic() {
@@ -57,8 +84,8 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio usando yt-dlp-wrap
-app.get("/stream/:id", (req, res) => {
+// 🎵 Streaming de audio MEJORADO
+app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) {
     return res.status(400).json({
@@ -68,40 +95,88 @@ app.get("/stream/:id", (req, res) => {
     });
   }
 
-  const url = `https://www.youtube.com/watch?v=${id}`;
+  try {
+    // ✅ Inicializar yt-dlp
+    await initYTDlp();
+    
+    const url = `https://www.youtube.com/watch?v=${id}`;
 
-  // yt-dlp-wrap devuelve un ChildProcess con stdout
-  const child = ytDlpWrap.exec([
-    "-f", "bestaudio",
-    "-o", "-",
-    url
-  ]);
+    const child = ytDlpWrap.exec([
+      "-f", "bestaudio/best[ext=webm]/best",
+      "--no-playlist",
+      "-o", "-",
+      url
+    ], { cwd: __dirname });
 
-  res.setHeader("Content-Type", "audio/webm");
-  res.setHeader("Cache-Control", "no-store");
-  res.setHeader("Accept-Ranges", "bytes");
+    // ✅ Headers mejorados
+    res.setHeader("Content-Type", "audio/webm; codecs=opus");
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Transfer-Encoding", "chunked");
 
-  child.stdout.pipe(res);
+    // ✅ Manejo robusto del stream
+    let headersSent = false;
+    
+    child.stdout.pipe(res);
 
-  child.on("error", err => {
-    console.error("❌ Error en yt-dlp:", err);
+    child.stdout.on('error', (err) => {
+      if (!headersSent) {
+        res.status(500).json({
+          error: "Stream fallido",
+          message: "Error en el stream de audio",
+          code: 500
+        });
+      }
+    });
+
+    child.on("error", (err) => {
+      console.error("❌ Error en yt-dlp:", err.message);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Stream fallido",
+          message: err.message.includes('ENOENT') 
+            ? "yt-dlp no instalado. Reinicia el servidor"
+            : "No se pudo procesar el video",
+          code: 500
+        });
+      }
+    });
+
+    child.on("close", (code) => {
+      headersSent = true;
+      if (code !== 0) {
+        console.error(`yt-dlp terminó con código ${code}`);
+      }
+    });
+
+    // ✅ Timeout de seguridad
+    req.setTimeout(30000);
+    res.socket.setTimeout(60000);
+
+  } catch (err) {
+    console.error("❌ Error preparando stream:", err);
     res.status(500).json({
       error: "Stream fallido",
-      message: err.message || "No se pudo iniciar el audio",
+      message: err.message,
       code: 500
     });
-  });
-
-  child.on("close", code => {
-    if (code !== 0) {
-      console.error(`yt-dlp terminó con código ${code}`);
-    }
-  });
+  }
 });
 
-// 🩺 Health check
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", ytReady: !!ytMusic, port: PORT });
+// 🩺 Health check MEJORADO
+app.get("/health", async (req, res) => {
+  try {
+    const ytdlpVersion = await ytDlpWrap?.getVersion().catch(() => "No disponible");
+    res.json({ 
+      status: "ok", 
+      ytReady: !!ytMusic, 
+      ytdlpReady: !!ytDlpWrap,
+      ytdlpVersion,
+      port: PORT 
+    });
+  } catch (err) {
+    res.json({ status: "error", message: err.message });
+  }
 });
 
 // Middleware de errores centralizado
@@ -114,12 +189,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Arranque
+// Arranque MEJORADO
 (async () => {
   try {
-    await getYTMusic();
+    // Inicializar ambos clientes
+    await Promise.all([
+      getYTMusic(),
+      initYTDlp()
+    ]);
+    
     app.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
+      console.log(`📊 Health check: http://localhost:${PORT}/health`);
     });
   } catch (err) {
     console.error("❌ Error arrancando:", err);
