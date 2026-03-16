@@ -56,23 +56,31 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
+// 🎵 Streaming de audio con validación y manejo de errores
 app.get("/stream/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
     if (!id || !ytdl.validateID(id)) {
-      return res.status(400).json({ error: "ID inválido o requerido" });
+      return res.status(400).json({ 
+        error: "Stream fallido", 
+        message: "ID inválido o requerido", 
+        code: 400 
+      });
     }
 
+    // Verifica si hay formatos de audio disponibles
     const info = await ytdl.getInfo(id);
     const audioFormats = ytdl.filterFormats(info.formats, "audioonly");
 
     if (!audioFormats.length) {
       return res.status(410).json({
         error: "Stream no disponible",
-        message: "No se pudo extraer audio de este video"
+        message: "No se pudo extraer audio de este video",
+        code: 410
       });
     }
 
+    // Usa el mejor formato de audio disponible
     const stream = ytdl(id, {
       filter: "audioonly",
       quality: "highestaudio"
@@ -90,14 +98,19 @@ app.get("/stream/:id", async (req, res, next) => {
       console.error("❌ Error en stream:", err);
       res.status(500).json({
         error: "Stream fallido",
-        message: err.message || "No se pudo iniciar el audio"
+        message: err.message || "No se pudo iniciar el audio",
+        code: 500
       });
     });
   } catch (err) {
-    next(err);
+    console.error("❌ Error general:", err);
+    res.status(500).json({
+      error: "Error interno",
+      message: err.message || "Algo salió mal",
+      code: 500
+    });
   }
 });
-
 
 // 🩺 Health check
 app.get("/health", (req, res) => {
