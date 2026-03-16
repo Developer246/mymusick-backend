@@ -56,7 +56,6 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con validación y fallback
 app.get("/stream/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -64,29 +63,19 @@ app.get("/stream/:id", async (req, res, next) => {
       return res.status(400).json({ error: "ID inválido o requerido" });
     }
 
-    // Verifica disponibilidad de formatos antes de iniciar el stream
     const info = await ytdl.getInfo(id);
     const audioFormats = ytdl.filterFormats(info.formats, "audioonly");
 
     if (!audioFormats.length) {
       return res.status(410).json({
         error: "Stream no disponible",
-        message: "El audio fue retirado o no está accesible"
+        message: "No se pudo extraer audio de este video"
       });
     }
 
-    // Intenta primero con opus/webm, si no existe usa el mejor disponible
     const stream = ytdl(id, {
-      filter: f =>
-        (f.audioCodec === "opus" && f.container === "webm") ||
-        f.container === "mp4",
-      quality: "highestaudio",
-      requestOptions: {
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          "Accept-Language": "en-US,en;q=0.9"
-        }
-      }
+      filter: "audioonly",
+      quality: "highestaudio"
     });
 
     stream.on("info", (info, format) => {
@@ -99,15 +88,16 @@ app.get("/stream/:id", async (req, res, next) => {
 
     stream.on("error", err => {
       console.error("❌ Error en stream:", err);
-      res.status(410).json({
-        error: "Stream no disponible",
-        message: "El audio fue retirado o no está accesible"
+      res.status(500).json({
+        error: "Stream fallido",
+        message: err.message || "No se pudo iniciar el audio"
       });
     });
   } catch (err) {
     next(err);
   }
 });
+
 
 // 🩺 Health check
 app.get("/health", (req, res) => {
