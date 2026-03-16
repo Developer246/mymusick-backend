@@ -2,22 +2,15 @@
 FROM node:20-alpine
 
 # Instalar dependencias del sistema
-RUN apk add --no-cache python3 py3-pip ffmpeg curl
+RUN apk add --no-cache python3 py3-pip ffmpeg curl unzip
 
 # ── Instalar yt-dlp ────────────────────────────────────────────────────────
 RUN pip3 install --no-cache-dir yt-dlp --break-system-packages
 
 # ── Instalar el plugin POT para yt-dlp ────────────────────────────────────
-# Descarga el zip del plugin desde GitHub y lo instala en el directorio de plugins de yt-dlp
-RUN mkdir -p /root/yt-dlp-plugins \
-    && curl -L \
-       https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/bgutil-ytdlp-pot-provider-rs.zip \
-       -o /tmp/pot-plugin.zip \
-    && unzip /tmp/pot-plugin.zip -d /root/yt-dlp-plugins/bgutil-ytdlp-pot-provider \
-    && rm /tmp/pot-plugin.zip
+RUN pip3 install --no-cache-dir bgutil-ytdlp-pot-provider --break-system-packages
 
 # ── Descargar binario bgutil-pot según arquitectura ───────────────────────
-# Railway puede ser x86_64 o aarch64 dependiendo del plan
 RUN ARCH=$(uname -m) \
     && if [ "$ARCH" = "x86_64" ]; then \
          BINARY="bgutil-pot-linux-x86_64"; \
@@ -31,7 +24,7 @@ RUN ARCH=$(uname -m) \
        "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/${BINARY}" \
        -o /usr/local/bin/bgutil-pot \
     && chmod +x /usr/local/bin/bgutil-pot \
-    && echo "bgutil-pot instalado correctamente"
+    && echo "bgutil-pot instalado OK"
 
 WORKDIR /app
 
@@ -44,7 +37,5 @@ COPY . .
 
 EXPOSE 8080
 
-# 1. Arrancar bgutil-pot server en background (puerto 4416)
-# 2. Esperar 3s a que inicialice
-# 3. Lanzar el backend Node
-CMD ["sh", "-c", "bgutil-pot server --host 127.0.0.1 --port 4416 & sleep 3 && node server.js"]
+# Arrancar bgutil-pot solo si existe, luego lanzar el backend
+CMD ["sh", "-c", "if command -v bgutil-pot > /dev/null 2>&1; then bgutil-pot server --host 127.0.0.1 --port 4416 & sleep 3 && echo '✅ bgutil-pot arrancado'; else echo '⚠️ bgutil-pot no disponible, continuando sin POT server'; fi && node server.js"]
