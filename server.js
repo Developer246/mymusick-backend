@@ -23,7 +23,7 @@ app.use(
   })
 );
 
-let ytClient  = null;
+let ytClient = null;
 let youtubedl = null;
 
 // ✅ Inicializar yt-dlp
@@ -63,19 +63,13 @@ async function getYT() {
   return ytClient;
 }
 
-// Obtener la miniatura de mayor resolución disponible
-function getBestThumbnail(thumbnails) {
-  if (!Array.isArray(thumbnails) || thumbnails.length === 0) return null;
-  return thumbnails
-    .filter((t) => t?.url)
-    .sort((a, b) => {
-      const areaA = (a.width || 0) * (a.height || 0);
-      const areaB = (b.width || 0) * (b.height || 0);
-      return areaB - areaA;
-    })[0]?.url || thumbnails[thumbnails.length - 1]?.url || null;
+// ✅ Obtener miniatura con fallback
+function getBestThumbnail(id) {
+  if (!id) return null;
+  return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
 }
 
-// Cache de URLs de audio (las URLs de YouTube duran ~6 horas)
+// ✅ Cache de URLs de audio
 const urlCache = new Map();
 const CACHE_TTL = 5 * 60 * 60 * 1000;
 
@@ -93,6 +87,7 @@ async function getAudioUrl(id) {
     preferFreeFormats: true,
     format: "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
     noPlaylist: true,
+    extractorArgs: `youtubepot-bgutilhttp:base_url=${POT_SERVER}`,
   });
 
   const audioFormat = info.formats
@@ -111,7 +106,7 @@ async function getAudioUrl(id) {
   return entry;
 }
 
-// Helper para hacer GET a una URL y retornar JSON
+// ✅ Helper para GET JSON
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
     const parsed   = new URL(url);
@@ -163,7 +158,7 @@ app.get("/search", async (req, res, next) => {
         artist: i.artists?.map((a) => a.name).join(", ") || "Desconocido",
         album: i.album?.name || null,
         duration: i.duration?.text || null,
-        thumbnail: getBestThumbnail(i.thumbnails),
+        thumbnail: getBestThumbnail(i.id || i.video_id),
       }));
 
     res.json(songs);
@@ -172,7 +167,7 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con soporte completo de Range
+// 🎵 Streaming de audio con soporte Range
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
@@ -182,7 +177,7 @@ app.get("/stream/:id", async (req, res) => {
 
     const ytHeaders = {
       "User-Agent": httpHeaders["User-Agent"] ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
       "Accept": "*/*",
       "Accept-Language": "en-US,en;q=0.9",
       "Accept-Encoding": "identity",
@@ -220,18 +215,10 @@ app.get("/stream/:id", async (req, res) => {
 
       if (ytRes.headers["content-range"]) {
         headers["Content-Range"] = ytRes.headers["content-range"];
-      } else if (filesize && rangeHeader) {
-        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-        if (match) {
-          const start = parseInt(match[1]);
-          const end   = match[2] ? parseInt(match[2]) : filesize - 1;
-          headers["Content-Range"] = `bytes ${start}-${end}/${filesize}`;
-        }
       }
 
       res.writeHead(status, headers);
       ytRes.pipe(res);
-      ytRes.on("error", (e) => console.error(`❌ Pipe error ${id}:`, e.message));
     });
 
     ytReq.on("error", (err) => {
@@ -254,7 +241,7 @@ app.get("/stream/:id", async (req, res) => {
   }
 });
 
-// 🎤 Letras de canciones via simpmusic API
+// 🎤 Letras de canciones
 app.get("/lyrics/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
@@ -310,3 +297,4 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 })();
+
