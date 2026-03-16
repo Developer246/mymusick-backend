@@ -1,6 +1,6 @@
 {
   "name": "mymusick-backend",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "YouTube Music Backend API",
   "main": "server.js",
   "type": "commonjs",
@@ -31,6 +31,7 @@
     "youtube-music",
     "streaming",
     "api",
-    "yt-dlp"
+    "yt-dlp",
+    "warp"
   ]
 }
