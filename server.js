@@ -1,8 +1,8 @@
-
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
 const ytdl = require("ytdl-core");
 
@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
+app.use(helmet());
 
 let ytMusic = null;
 
@@ -25,7 +26,7 @@ async function getYTMusic() {
 }
 
 // 🔍 Búsqueda de canciones
-app.get("/music/search", async (req, res, next) => {
+app.get("/search", async (req, res, next) => {
   try {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
@@ -33,17 +34,21 @@ app.get("/music/search", async (req, res, next) => {
     const yt = await getYTMusic();
     const search = await yt.music.search(q, { type: "song" });
 
-    const items = search.contents?.flatMap(s => s.contents || [])
-      .filter(i => i?.videoId) || [];
+    const items = Array.isArray(search.contents)
+      ? search.contents.flatMap(s => s.contents || [])
+      : [];
 
-    const songs = items.slice(0, 10).map(item => ({
-      id: item.videoId,
-      title: item.title || "Sin título",
-      artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-      album: item.album?.name || null,
-      duration: item.duration?.text || null,
-      thumbnail: item.thumbnails?.[0]?.url || null,
-    }));
+    const songs = items
+      .filter(i => i?.videoId)
+      .slice(0, 10)
+      .map(item => ({
+        id: item.videoId,
+        title: item.title || "Sin título",
+        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: item.album?.name || null,
+        duration: item.duration?.text || null,
+        thumbnail: item.thumbnails?.[0]?.url || null,
+      }));
 
     res.json(songs);
   } catch (err) {
@@ -51,11 +56,13 @@ app.get("/music/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio
-app.get("/music/stream/:id", async (req, res, next) => {
+// 🎵 Streaming de audio con soporte de Range
+app.get("/stream/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!id) return res.status(400).json({ error: "ID requerido" });
+    if (!id || !ytdl.validateID(id)) {
+      return res.status(400).json({ error: "ID inválido o requerido" });
+    }
 
     const stream = ytdl(id, {
       filter: f => f.audioCodec === "opus" && f.container === "webm",
@@ -89,7 +96,7 @@ app.get("/health", (req, res) => {
 // Middleware de errores centralizado
 app.use((err, req, res, next) => {
   console.error("❌ Error:", err);
-  res.status(500).json({
+  res.status(err.statusCode || 500).json({
     error: "Error interno",
     message: err.message || "Algo salió mal"
   });
