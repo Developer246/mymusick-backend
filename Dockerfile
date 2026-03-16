@@ -1,12 +1,12 @@
 # Base con Node 20
 FROM node:20-alpine
 
-# Solo ffmpeg es necesario (youtube-dl-exec descarga yt-dlp automáticamente)
+# ffmpeg para procesamiento de audio
 RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 
-# Copiar dependencias — el postinstall de youtube-dl-exec descarga el binario yt-dlp
+# Copiar dependencias (youtube-dl-exec descarga yt-dlp en postinstall)
 COPY package*.json ./
 RUN npm install --omit=dev
 
