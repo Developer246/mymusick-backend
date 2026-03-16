@@ -66,7 +66,6 @@ async function getYT() {
 // Obtener la miniatura de mayor resolución disponible
 function getBestThumbnail(thumbnails) {
   if (!Array.isArray(thumbnails) || thumbnails.length === 0) return null;
-  // Ordenar por área (width * height) de mayor a menor y tomar la primera
   return thumbnails
     .filter((t) => t?.url)
     .sort((a, b) => {
@@ -112,6 +111,36 @@ async function getAudioUrl(id) {
   return entry;
 }
 
+// Helper para hacer GET a una URL y retornar JSON
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const parsed   = new URL(url);
+    const protocol = parsed.protocol === "https:" ? https : http;
+
+    const req = protocol.get(
+      url,
+      { headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" } },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => { data += chunk; });
+        res.on("end", () => {
+          try {
+            resolve({ status: res.statusCode, body: JSON.parse(data) });
+          } catch (e) {
+            reject(new Error("Error parseando JSON de respuesta"));
+          }
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.setTimeout(8000, () => {
+      req.destroy();
+      reject(new Error("Timeout en la petición"));
+    });
+  });
+}
+
 // 🔍 Búsqueda de canciones
 app.get("/search", async (req, res, next) => {
   try {
@@ -134,7 +163,6 @@ app.get("/search", async (req, res, next) => {
         artist: i.artists?.map((a) => a.name).join(", ") || "Desconocido",
         album: i.album?.name || null,
         duration: i.duration?.text || null,
-        // ✅ Mejor miniatura disponible ordenada por resolución
         thumbnail: getBestThumbnail(i.thumbnails),
       }));
 
@@ -147,7 +175,6 @@ app.get("/search", async (req, res, next) => {
 // 🎵 Streaming de audio con soporte completo de Range
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
-
   if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
 
   try {
@@ -224,6 +251,27 @@ app.get("/stream/:id", async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: err.message, code: 500 });
     }
+  }
+});
+
+// 🎤 Letras de canciones via simpmusic API
+app.get("/lyrics/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: "ID inválido", code: 400 });
+
+  try {
+    const apiUrl = `https://api-lyrics.simpmusic.org/v1/search?q=${encodeURIComponent(id)}`;
+    const { status, body } = await fetchJson(apiUrl);
+
+    if (status !== 200 || !body) {
+      return res.status(404).json({ error: "Letras no encontradas", code: 404 });
+    }
+
+    console.log(`✅ Letras obtenidas para ${id}`);
+    res.json(body);
+  } catch (err) {
+    console.error(`❌ Error en lyrics ${id}:`, err.message);
+    res.status(500).json({ error: err.message, code: 500 });
   }
 });
 
