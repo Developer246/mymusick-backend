@@ -5,12 +5,15 @@ const morgan = require("morgan");
 const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
 const { create: createYoutubeDl } = require("youtube-dl-exec");
-const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Proxy WARP inyectado por docker-compose via HTTPS_PROXY env var
+// youtube-dl-exec lo usa automáticamente si está en el entorno
+const PROXY = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || null;
 
 app.use(cors());
 app.use(express.json());
@@ -20,11 +23,10 @@ app.use(helmet());
 let ytClient = null;
 let youtubedl = null;
 
-// ✅ Inicializar youtube-dl-exec apuntando al binario de yt-dlp
+// ✅ Inicializar youtube-dl-exec
 async function initYoutubeDl() {
   if (youtubedl) return youtubedl;
 
-  // Rutas donde youtube-dl-exec instala el binario automáticamente
   const binaryPaths = [
     process.env.YTDLP_PATH,
     path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
@@ -35,10 +37,11 @@ async function initYoutubeDl() {
   for (const binPath of binaryPaths) {
     if (fs.existsSync(binPath)) {
       try {
-        youtubedl = createYoutubeDl(binPath);
-        // Verificar que funciona
-        const result = await youtubedl("--version", { printJson: false });
+        const instance = createYoutubeDl(binPath);
+        await instance("--version", { printJson: false });
+        youtubedl = instance;
         console.log(`✅ youtube-dl-exec listo (${binPath})`);
+        if (PROXY) console.log(`🔀 Usando proxy WARP: ${PROXY}`);
         return youtubedl;
       } catch (_) {
         youtubedl = null;
@@ -46,7 +49,7 @@ async function initYoutubeDl() {
     }
   }
 
-  throw new Error("yt-dlp binario no encontrado. Revisa la instalación de youtube-dl-exec.");
+  throw new Error("yt-dlp binario no encontrado.");
 }
 
 // ✅ Inicializar cliente YouTube Music
@@ -89,8 +92,7 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio
-// Estrategia: obtener URL directa con youtube-dl-exec y redirigir al cliente
+// 🎵 Streaming de audio via WARP proxy
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -107,17 +109,24 @@ app.get("/stream/:id", async (req, res) => {
 
     const url = `https://www.youtube.com/watch?v=${id}`;
 
-    // Obtener la URL directa del audio sin descargar nada
-    const info = await youtubedl(url, {
+    // Opciones base
+    const opts = {
       dumpSingleJson: true,
       noWarnings: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
       format: "bestaudio/best",
       noPlaylist: true,
-    });
+    };
 
-    // Buscar la URL del mejor formato de audio
+    // Agregar proxy WARP si está disponible
+    if (PROXY) {
+      opts.proxy = PROXY;
+    }
+
+    const info = await youtubedl(url, opts);
+
+    // Extraer URL del mejor formato de solo audio
     const audioFormat = info.formats
       ?.filter((f) => f.acodec !== "none" && f.vcodec === "none" && f.url)
       ?.sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0];
@@ -133,7 +142,6 @@ app.get("/stream/:id", async (req, res) => {
     }
 
     console.log(`✅ Stream via redirect para ${id}`);
-    // Redirigir: el audio fluye de YouTube al cliente directamente
     return res.redirect(streamUrl);
 
   } catch (err) {
@@ -154,6 +162,7 @@ app.get("/health", async (req, res) => {
     status: "ok",
     ytReady: !!ytClient,
     ytdlpReady: !!youtubedl,
+    proxy: PROXY || "ninguno",
     port: PORT,
   });
 });
@@ -168,7 +177,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 🚀 Arranque del servidor
+// 🚀 Arranque
 (async () => {
   try {
     await Promise.all([getYT(), initYoutubeDl()]);
