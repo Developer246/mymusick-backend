@@ -10,7 +10,7 @@ WORKDIR /app
 
 # Copiar dependencias primero (mejor cache)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm install --omit=dev
 
 # Copiar el resto del código
 COPY . .
