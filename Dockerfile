@@ -1,4 +1,4 @@
-# Partir de Node 20 (Alpine) — Railway lo soporta
+# Partir de Node 20 (Alpine)
 FROM node:20-alpine
 
 # Instalar dependencias del sistema
@@ -17,14 +17,15 @@ RUN ARCH=$(uname -m) \
        elif [ "$ARCH" = "aarch64" ]; then \
          BINARY="bgutil-pot-linux-aarch64"; \
        else \
-         echo "Arquitectura no soportada: $ARCH" && exit 1; \
+         echo "⚠️ Arquitectura no soportada: $ARCH, omitiendo bgutil-pot"; \
+         exit 0; \
        fi \
-    && echo "Descargando binario para $ARCH: $BINARY" \
-    && curl -L \
+    && echo "📦 Descargando $BINARY..." \
+    && curl -fL \
        "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/${BINARY}" \
        -o /usr/local/bin/bgutil-pot \
     && chmod +x /usr/local/bin/bgutil-pot \
-    && echo "bgutil-pot instalado OK"
+    && echo "✅ bgutil-pot instalado ($(bgutil-pot --version 2>&1 || echo 'versión desconocida'))"
 
 WORKDIR /app
 
@@ -32,10 +33,12 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 
-# Copiar código
+# Copiar código y script de arranque
 COPY . .
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 EXPOSE 8080
 
-# Arrancar bgutil-pot solo si existe, luego lanzar el backend
-CMD ["sh", "-c", "if command -v bgutil-pot > /dev/null 2>&1; then bgutil-pot server --host 127.0.0.1 --port 4416 & sleep 3 && echo '✅ bgutil-pot arrancado'; else echo '⚠️ bgutil-pot no disponible, continuando sin POT server'; fi && node server.js"]
+# Usar script dedicado en lugar de CMD inline
+ENTRYPOINT ["/start.sh"]
