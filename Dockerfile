@@ -1,8 +1,16 @@
-# Partir de Node 20 (Alpine)
-FROM node:20-alpine
+# node:20-slim es Debian — compatible con el binario glibc de bgutil-pot
+# Alpine usa musl y NO es compatible con ese binario
+FROM node:20-slim
 
-# Instalar dependencias del sistema
-RUN apk add --no-cache python3 py3-pip ffmpeg curl unzip
+# Instalar dependencias del sistema (apt en lugar de apk)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    ffmpeg \
+    curl \
+    unzip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # ── Instalar yt-dlp ────────────────────────────────────────────────────────
 RUN pip3 install --no-cache-dir yt-dlp --break-system-packages
@@ -17,15 +25,15 @@ RUN ARCH=$(uname -m) \
        elif [ "$ARCH" = "aarch64" ]; then \
          BINARY="bgutil-pot-linux-aarch64"; \
        else \
-         echo "⚠️ Arquitectura no soportada: $ARCH, omitiendo bgutil-pot"; \
-         exit 0; \
+         echo "⚠️ Arquitectura no soportada: $ARCH" && exit 1; \
        fi \
-    && echo "📦 Descargando $BINARY..." \
+    && echo "📦 Descargando $BINARY para $ARCH..." \
     && curl -fL \
        "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/latest/download/${BINARY}" \
        -o /usr/local/bin/bgutil-pot \
     && chmod +x /usr/local/bin/bgutil-pot \
-    && echo "✅ bgutil-pot instalado ($(bgutil-pot --version 2>&1 || echo 'versión desconocida'))"
+    && bgutil-pot --version \
+    && echo "✅ bgutil-pot instalado correctamente"
 
 WORKDIR /app
 
@@ -40,5 +48,4 @@ RUN chmod +x /start.sh
 
 EXPOSE 8080
 
-# Usar script dedicado en lugar de CMD inline
 ENTRYPOINT ["/start.sh"]
