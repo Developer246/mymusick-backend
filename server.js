@@ -39,15 +39,15 @@ app.get("/search", async (req, res, next) => {
       : [];
 
     const songs = items
-      .filter(i => i?.videoId)
+      .filter(i => i?.id || i?.video_id)
       .slice(0, 10)
-      .map(item => ({
-        id: item.videoId,
-        title: item.title || "Sin título",
-        artist: item.artists?.map(a => a.name).join(", ") || "Desconocido",
-        album: item.album?.name || null,
-        duration: item.duration?.text || null,
-        thumbnail: item.thumbnails?.[0]?.url || null,
+      .map(i => ({
+        id: i.id || i.video_id, // compatibilidad con distintas estructuras
+        title: i.title || "Sin título",
+        artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
+        album: i.album?.name || null,
+        duration: i.duration?.text || null,
+        thumbnail: i.thumbnails?.[0]?.url || null,
       }));
 
     res.json(songs);
@@ -114,4 +114,5 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 })();
+
 
