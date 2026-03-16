@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "youtubei.js": "^16.0.1",
-    "yt-dlp-wrap": "^3.0.1",
+    "yt-dlp-wrap": "^2.3.12",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "https-proxy-agent": "^7.0.6",
