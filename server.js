@@ -4,7 +4,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
-const ytdl = require("ytdl-core");
+const { spawn } = require("child_process");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,7 +42,7 @@ app.get("/search", async (req, res, next) => {
       .filter(i => i?.id || i?.video_id)
       .slice(0, 10)
       .map(i => ({
-        id: i.id || i.video_id, // compatibilidad con distintas estructuras
+        id: i.id || i.video_id,
         title: i.title || "Sin título",
         artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
         album: i.album?.name || null,
@@ -56,68 +56,50 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con validación y fallback
-app.get("/stream/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!id || !ytdl.validateID(id)) {
-      return res.status(400).json({
-        error: "Stream fallido",
-        message: "ID inválido o requerido",
-        code: 400
-      });
-    }
-
-    let info;
-    try {
-      info = await ytdl.getInfo(id);
-    } catch (err) {
-      console.error("❌ Error getInfo:", err);
-      return res.status(500).json({
-        error: "Stream fallido",
-        message: "No se pudo obtener información del video",
-        code: 500
-      });
-    }
-
-    const audioFormats = ytdl.filterFormats(info.formats, "audioonly");
-    if (!audioFormats.length) {
-      return res.status(410).json({
-        error: "Stream no disponible",
-        message: "No se pudo extraer audio de este video",
-        code: 410
-      });
-    }
-
-    const stream = ytdl(id, {
-      filter: "audioonly",
-      quality: "highestaudio"
-    });
-
-    stream.on("info", (info, format) => {
-      res.setHeader("Content-Type", format.mimeType || "audio/webm");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Accept-Ranges", "bytes");
-    });
-
-    stream.pipe(res);
-
-    stream.on("error", err => {
-      console.error("❌ Error en stream:", err);
-      res.status(500).json({
-        error: "Stream fallido",
-        message: err.message || "No se pudo iniciar el audio",
-        code: 500
-      });
-    });
-  } catch (err) {
-    console.error("❌ Error general:", err);
-    res.status(500).json({
-      error: "Error interno",
-      message: err.message || "Algo salió mal",
-      code: 500
+// 🎵 Streaming de audio usando yt-dlp
+app.get("/stream/:id", (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({
+      error: "Stream fallido",
+      message: "ID inválido o requerido",
+      code: 400
     });
   }
+
+  const url = `https://www.youtube.com/watch?v=${id}`;
+
+  // Ejecuta yt-dlp para obtener el mejor audio disponible
+  const ytdlp = spawn("yt-dlp", [
+    "-f", "bestaudio",
+    "-o", "-", // salida estándar
+    url
+  ]);
+
+  res.setHeader("Content-Type", "audio/webm");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Accept-Ranges", "bytes");
+
+  ytdlp.stdout.pipe(res);
+
+  ytdlp.stderr.on("data", data => {
+    console.error("yt-dlp error:", data.toString());
+  });
+
+  ytdlp.on("error", err => {
+    console.error("❌ Error en yt-dlp:", err);
+    res.status(500).json({
+      error: "Stream fallido",
+      message: err.message || "No se pudo iniciar el audio",
+      code: 500
+    });
+  });
+
+  ytdlp.on("close", code => {
+    if (code !== 0) {
+      console.error(`yt-dlp terminó con código ${code}`);
+    }
+  });
 });
 
 // 🩺 Health check
@@ -130,7 +112,8 @@ app.use((err, req, res, next) => {
   console.error("❌ Error:", err);
   res.status(err.statusCode || 500).json({
     error: "Error interno",
-    message: err.message || "Algo salió mal"
+    message: err.message || "Algo salió mal",
+    code: err.statusCode || 500
   });
 });
 
@@ -146,3 +129,4 @@ app.use((err, req, res, next) => {
     process.exit(1);
   }
 })();
+
