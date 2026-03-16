@@ -1,6 +1,6 @@
 {
   "name": "mymusick-backend",
-  "version": "2.3.0",
+  "version": "4.0.0",
   "description": "YouTube Music Backend API",
   "main": "server.js",
   "type": "commonjs",
@@ -11,10 +11,9 @@
   },
   "dependencies": {
     "youtubei.js": "^16.0.1",
-    "yt-dlp-wrap": "^2.3.12",
+    "youtube-dl-exec": "^3.0.30",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "https-proxy-agent": "^7.0.6",
     "dotenv": "^16.4.5",
     "morgan": "^1.10.0",
     "helmet": "^7.1.0"
