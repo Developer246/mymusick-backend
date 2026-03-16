@@ -4,7 +4,9 @@ const cors = require("cors");
 const morgan = require("morgan");
 const helmet = require("helmet");
 const { Innertube } = require("youtubei.js");
-const YTDlpWrap = require("yt-dlp-wrap").default;
+const { create: createYoutubeDl } = require("youtube-dl-exec");
+const { spawn } = require("child_process");
+const path = require("path");
 const fs = require("fs");
 
 const app = express();
@@ -15,15 +17,17 @@ app.use(express.json());
 app.use(morgan("dev"));
 app.use(helmet());
 
-let ytMusic = null;
-let ytDlpWrap = null;
+let ytClient = null;
+let youtubedl = null;
 
-// ✅ Inicializar yt-dlp apuntando al binario del sistema
-async function initYTDlp() {
-  if (ytDlpWrap) return ytDlpWrap;
+// ✅ Inicializar youtube-dl-exec apuntando al binario de yt-dlp
+async function initYoutubeDl() {
+  if (youtubedl) return youtubedl;
 
+  // Rutas donde youtube-dl-exec instala el binario automáticamente
   const binaryPaths = [
     process.env.YTDLP_PATH,
+    path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
     "/usr/local/bin/yt-dlp",
     "/usr/bin/yt-dlp",
   ].filter(Boolean);
@@ -31,29 +35,27 @@ async function initYTDlp() {
   for (const binPath of binaryPaths) {
     if (fs.existsSync(binPath)) {
       try {
-        const instance = new YTDlpWrap(binPath);
-        const version = await instance.getVersion();
-        ytDlpWrap = instance;
-        console.log(`✅ yt-dlp listo v${version} (${binPath})`);
-        return ytDlpWrap;
+        youtubedl = createYoutubeDl(binPath);
+        // Verificar que funciona
+        const result = await youtubedl("--version", { printJson: false });
+        console.log(`✅ youtube-dl-exec listo (${binPath})`);
+        return youtubedl;
       } catch (_) {
-        // Intentar siguiente ruta
+        youtubedl = null;
       }
     }
   }
 
-  throw new Error(
-    "yt-dlp no encontrado en el sistema. Agrégalo al Dockerfile con: pip install yt-dlp"
-  );
+  throw new Error("yt-dlp binario no encontrado. Revisa la instalación de youtube-dl-exec.");
 }
 
 // ✅ Inicializar cliente YouTube Music
-async function getYTMusic() {
-  if (!ytMusic) {
-    ytMusic = await Innertube.create({ client_type: "WEB_REMIX" });
+async function getYT() {
+  if (!ytClient) {
+    ytClient = await Innertube.create({ client_type: "WEB_REMIX" });
     console.log("✅ Cliente YouTube Music listo");
   }
-  return ytMusic;
+  return ytClient;
 }
 
 // 🔍 Búsqueda de canciones
@@ -62,7 +64,7 @@ app.get("/search", async (req, res, next) => {
     const q = req.query.q?.trim();
     if (!q) return res.json([]);
 
-    const yt = await getYTMusic();
+    const yt = await getYT();
     const search = await yt.music.search(q, { type: "song" });
 
     const items = Array.isArray(search.contents)
@@ -88,6 +90,7 @@ app.get("/search", async (req, res, next) => {
 });
 
 // 🎵 Streaming de audio
+// Estrategia: obtener URL directa con youtube-dl-exec y redirigir al cliente
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -100,81 +103,59 @@ app.get("/stream/:id", async (req, res) => {
   }
 
   try {
-    await initYTDlp();
+    await initYoutubeDl();
 
     const url = `https://www.youtube.com/watch?v=${id}`;
 
-    const child = ytDlpWrap.exec(
-      ["-f", "bestaudio/best[ext=webm]/best", "--no-playlist", "-o", "-", url],
-      { cwd: __dirname }
-    );
-
-    res.setHeader("Content-Type", "audio/webm; codecs=opus");
-    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Transfer-Encoding", "chunked");
-
-    child.stdout.pipe(res);
-
-    child.stdout.on("error", (err) => {
-      console.error("❌ Error en stdout:", err.message);
-      if (!res.headersSent) {
-        res.status(500).json({
-          error: "Stream fallido",
-          message: "Error en el stream de audio",
-          code: 500,
-        });
-      }
+    // Obtener la URL directa del audio sin descargar nada
+    const info = await youtubedl(url, {
+      dumpSingleJson: true,
+      noWarnings: true,
+      noCheckCertificates: true,
+      preferFreeFormats: true,
+      format: "bestaudio/best",
+      noPlaylist: true,
     });
 
-    child.on("error", (err) => {
-      console.error("❌ Error en yt-dlp:", err.message);
-      if (!res.headersSent) {
-        res.status(500).json({
-          error: "Stream fallido",
-          message: err.message.includes("ENOENT")
-            ? "yt-dlp no instalado. Revisa el Dockerfile."
-            : "No se pudo procesar el video",
-          code: 500,
-        });
-      }
-    });
+    // Buscar la URL del mejor formato de audio
+    const audioFormat = info.formats
+      ?.filter((f) => f.acodec !== "none" && f.vcodec === "none" && f.url)
+      ?.sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0];
 
-    child.on("close", (code) => {
-      if (code !== 0) {
-        console.error(`⚠️ yt-dlp terminó con código ${code}`);
-      }
-    });
+    const streamUrl = audioFormat?.url || info.url;
 
-    req.setTimeout(30000);
-    res.socket?.setTimeout(60000);
+    if (!streamUrl) {
+      return res.status(404).json({
+        error: "Stream fallido",
+        message: "No se encontró URL de audio",
+        code: 404,
+      });
+    }
+
+    console.log(`✅ Stream via redirect para ${id}`);
+    // Redirigir: el audio fluye de YouTube al cliente directamente
+    return res.redirect(streamUrl);
+
   } catch (err) {
-    console.error("❌ Error preparando stream:", err.message);
-    res.status(500).json({
-      error: "Stream fallido",
-      message: err.message,
-      code: 500,
-    });
+    console.error(`❌ Error en stream ${id}:`, err.message);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Stream fallido",
+        message: err.message,
+        code: 500,
+      });
+    }
   }
 });
 
 // 🩺 Health check
 app.get("/health", async (req, res) => {
-  try {
-    const ytdlpVersion = ytDlpWrap
-      ? await ytDlpWrap.getVersion().catch(() => "error al obtener versión")
-      : "no inicializado";
-
-    res.json({
-      status: "ok",
-      ytReady: !!ytMusic,
-      ytdlpReady: !!ytDlpWrap,
-      ytdlpVersion,
-      port: PORT,
-    });
-  } catch (err) {
-    res.status(500).json({ status: "error", message: err.message });
-  }
+  res.json({
+    status: "ok",
+    ytReady: !!ytClient,
+    ytdlpReady: !!youtubedl,
+    port: PORT,
+  });
 });
 
 // Middleware de errores centralizado
@@ -190,7 +171,7 @@ app.use((err, req, res, next) => {
 // 🚀 Arranque del servidor
 (async () => {
   try {
-    await Promise.all([getYTMusic(), initYTDlp()]);
+    await Promise.all([getYT(), initYoutubeDl()]);
 
     app.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
