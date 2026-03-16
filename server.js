@@ -11,9 +11,8 @@ const fs = require("fs");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Proxy WARP inyectado por docker-compose via HTTPS_PROXY env var
-// youtube-dl-exec lo usa automáticamente si está en el entorno
-const PROXY = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || null;
+// Puerto del servidor POT (bgutil-ytdlp-pot-provider)
+const POT_SERVER = process.env.POT_SERVER || "http://127.0.0.1:4416";
 
 app.use(cors());
 app.use(express.json());
@@ -29,8 +28,8 @@ async function initYoutubeDl() {
 
   const binaryPaths = [
     process.env.YTDLP_PATH,
-    path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
     "/usr/local/bin/yt-dlp",
+    path.join(__dirname, "node_modules", "youtube-dl-exec", "bin", "yt-dlp"),
     "/usr/bin/yt-dlp",
   ].filter(Boolean);
 
@@ -40,8 +39,8 @@ async function initYoutubeDl() {
         const instance = createYoutubeDl(binPath);
         await instance("--version", { printJson: false });
         youtubedl = instance;
-        console.log(`✅ youtube-dl-exec listo (${binPath})`);
-        if (PROXY) console.log(`🔀 Usando proxy WARP: ${PROXY}`);
+        console.log(`✅ yt-dlp listo (${binPath})`);
+        console.log(`🔑 POT server: ${POT_SERVER}`);
         return youtubedl;
       } catch (_) {
         youtubedl = null;
@@ -49,7 +48,7 @@ async function initYoutubeDl() {
     }
   }
 
-  throw new Error("yt-dlp binario no encontrado.");
+  throw new Error("yt-dlp no encontrado.");
 }
 
 // ✅ Inicializar cliente YouTube Music
@@ -92,7 +91,7 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio via WARP proxy
+// 🎵 Streaming de audio con PO Token
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -109,24 +108,19 @@ app.get("/stream/:id", async (req, res) => {
 
     const url = `https://www.youtube.com/watch?v=${id}`;
 
-    // Opciones base
-    const opts = {
+    // PO Token provider activo en localhost:4416
+    // yt-dlp lo usa automáticamente via extractor-args
+    const info = await youtubedl(url, {
       dumpSingleJson: true,
       noWarnings: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
       format: "bestaudio/best",
       noPlaylist: true,
-    };
+      extractorArgs: `youtubepot-bgutilhttp:base_url=${POT_SERVER}`,
+    });
 
-    // Agregar proxy WARP si está disponible
-    if (PROXY) {
-      opts.proxy = PROXY;
-    }
-
-    const info = await youtubedl(url, opts);
-
-    // Extraer URL del mejor formato de solo audio
+    // Extraer mejor URL de solo audio
     const audioFormat = info.formats
       ?.filter((f) => f.acodec !== "none" && f.vcodec === "none" && f.url)
       ?.sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0];
@@ -141,7 +135,7 @@ app.get("/stream/:id", async (req, res) => {
       });
     }
 
-    console.log(`✅ Stream via redirect para ${id}`);
+    console.log(`✅ Stream listo para ${id}`);
     return res.redirect(streamUrl);
 
   } catch (err) {
@@ -162,7 +156,7 @@ app.get("/health", async (req, res) => {
     status: "ok",
     ytReady: !!ytClient,
     ytdlpReady: !!youtubedl,
-    proxy: PROXY || "ninguno",
+    potServer: POT_SERVER,
     port: PORT,
   });
 });
