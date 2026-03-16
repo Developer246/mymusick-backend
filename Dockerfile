@@ -1,14 +1,12 @@
 # Base con Node 20
 FROM node:20-alpine
 
-# Instalar Python, pip, ffmpeg y yt-dlp
-RUN apk add --no-cache python3 py3-pip ffmpeg curl \
-    && pip3 install --no-cache-dir yt-dlp --break-system-packages \
-    && yt-dlp --version
+# Solo ffmpeg es necesario (youtube-dl-exec descarga yt-dlp automáticamente)
+RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
 
-# Copiar dependencias primero (mejor cache)
+# Copiar dependencias — el postinstall de youtube-dl-exec descarga el binario yt-dlp
 COPY package*.json ./
 RUN npm install --omit=dev
 
