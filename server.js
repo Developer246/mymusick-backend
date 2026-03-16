@@ -55,7 +55,8 @@ app.get("/search", async (req, res, next) => {
     next(err);
   }
 });
-
+const YTDlpWrap = require("yt-dlp-wrap").default;
+const ytDlpWrap = new YTDlpWrap();
 // 🎵 Streaming de audio usando yt-dlp
 app.get("/stream/:id", (req, res) => {
   const { id } = req.params;
