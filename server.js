@@ -7,6 +7,8 @@ const { Innertube } = require("youtubei.js");
 const { create: createYoutubeDl } = require("youtube-dl-exec");
 const path = require("path");
 const fs = require("fs");
+const https = require("https");
+const http = require("http");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -89,7 +91,7 @@ app.get("/search", async (req, res, next) => {
   }
 });
 
-// 🎵 Streaming de audio con PO Token
+// 🎵 Streaming de audio — pipe a través del servidor (evita 403 de googlevideo)
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -106,15 +108,13 @@ app.get("/stream/:id", async (req, res) => {
 
     const url = `https://www.youtube.com/watch?v=${id}`;
 
-    // El plugin bgutil-ytdlp-pot-provider detecta automáticamente
-    // el servidor POT en localhost:4416 — no hace falta extractor-args
-    // si el servidor está en el puerto por defecto
+    // Obtener info del video (URL directa del audio)
     const info = await youtubedl(url, {
       dumpSingleJson: true,
       noWarnings: true,
       noCheckCertificates: true,
       preferFreeFormats: true,
-      format: "bestaudio/best",
+      format: "bestaudio[ext=webm]/bestaudio/best",
       noPlaylist: true,
     });
 
@@ -124,6 +124,10 @@ app.get("/stream/:id", async (req, res) => {
       ?.sort((a, b) => (b.abr || 0) - (a.abr || 0))?.[0];
 
     const streamUrl = audioFormat?.url || info.url;
+    const mimeType = audioFormat?.audio_ext === "webm"
+      ? "audio/webm; codecs=opus"
+      : "audio/mpeg";
+    const contentLength = audioFormat?.filesize || audioFormat?.filesize_approx || null;
 
     if (!streamUrl) {
       return res.status(404).json({
@@ -133,8 +137,76 @@ app.get("/stream/:id", async (req, res) => {
       });
     }
 
-    console.log(`✅ Stream listo para ${id}`);
-    return res.redirect(streamUrl);
+    console.log(`✅ Iniciando pipe para ${id} (${mimeType})`);
+
+    // Headers que YouTube espera — sin ellos devuelve 403
+    const ytHeaders = {
+      "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+      "Accept": "*/*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Accept-Encoding": "identity",
+      "Origin": "https://www.youtube.com",
+      "Referer": "https://www.youtube.com/",
+      "Sec-Fetch-Dest": "audio",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Site": "cross-site",
+    };
+
+    // Soporte de range requests (necesario para seek en el player)
+    if (req.headers.range) {
+      ytHeaders["Range"] = req.headers.range;
+    }
+
+    const parsedUrl = new URL(streamUrl);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    const ytReq = protocol.get(
+      streamUrl,
+      { headers: ytHeaders },
+      (ytRes) => {
+        // Propagar código de estado (200 o 206 para range)
+        const statusCode = ytRes.statusCode === 206 ? 206 : 200;
+
+        res.status(statusCode);
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+
+        if (ytRes.headers["content-length"]) {
+          res.setHeader("Content-Length", ytRes.headers["content-length"]);
+        } else if (contentLength) {
+          res.setHeader("Content-Length", contentLength);
+        }
+
+        if (ytRes.headers["content-range"]) {
+          res.setHeader("Content-Range", ytRes.headers["content-range"]);
+        }
+
+        // Pipe: YouTube → nuestro servidor → cliente
+        ytRes.pipe(res);
+
+        ytRes.on("error", (err) => {
+          console.error("❌ Error en pipe de YouTube:", err.message);
+        });
+      }
+    );
+
+    ytReq.on("error", (err) => {
+      console.error("❌ Error conectando a YouTube:", err.message);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: "Stream fallido",
+          message: "No se pudo conectar al servidor de audio",
+          code: 500,
+        });
+      }
+    });
+
+    // Si el cliente corta la conexión, cancelar la petición a YouTube
+    req.on("close", () => {
+      ytReq.destroy();
+    });
 
   } catch (err) {
     console.error(`❌ Error en stream ${id}:`, err.message);
