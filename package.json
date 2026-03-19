@@ -1,7 +1,7 @@
 {
   "name": "mymusick-backend",
   "version": "5.1.0",
-  "description": "YouTube Music Backend API",
+  "description": "YouTube Music Backend API con bgutil-pot",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
@@ -10,13 +10,15 @@
     "health": "curl -s http://localhost:8080/health | jq"
   },
   "dependencies": {
-    "youtubei.js": "^16.0.1",
-    "youtube-dl-exec": "^3.0.30",
+    "compression": "^1.7.5",
     "cors": "^2.8.5",
-    "express": "^4.19.2",
     "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
     "morgan": "^1.10.0",
-    "helmet": "^7.1.0"
+    "youtube-dl-exec": "^3.0.30",
+    "youtubei.js": "^16.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
@@ -32,6 +34,7 @@
     "streaming",
     "api",
     "yt-dlp",
-    "po-token"
+    "po-token",
+    "bgutil-pot"
   ]
 }
