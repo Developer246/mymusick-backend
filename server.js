@@ -159,7 +159,7 @@ function fetchJson(url) {
 
 // ==================== RUTAS ====================
 
-// 🔍 BÚSQUEDA CORREGIDA PARA youtubei.js v16 + bgutil-pot (2026)
+// 🔍 BÚSQUEDA - Versión robusta para youtubei.js v16 (Marzo 2026)
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -169,70 +169,53 @@ app.get("/search", async (req, res) => {
 
     const yt = await getYT();
 
-    // Buscamos con YouTube Music
-    const searchResult = await yt.music.search(q, { type: "song" });
+    let searchResult;
+    try {
+      // Intento 1: Cliente Music (WEB_REMIX)
+      searchResult = await yt.music.search(q);
+    } catch (e) {
+      console.warn("WEB_REMIX falló, intentando con WEB...", e.message);
+      ytClient = null;
+      const ytWeb = await Innertube.create({ client_type: "WEB" });
+      searchResult = await ytWeb.search(q);
+    }
 
-    // Nueva extracción robusta (funciona mejor en v16)
-    let allItems = [];
-
+    // Extracción robusta de resultados (maneja varios formatos de respuesta)
+    let items = [];
     if (searchResult?.results?.length) {
-      allItems = searchResult.results;
+      items = searchResult.results;
     } else if (searchResult?.contents) {
-      allItems = searchResult.contents.flatMap(s => s.contents || []);
+      items = searchResult.contents.flatMap(section => section?.contents || []);
     } else if (searchResult?.on_response_received_commands) {
-      allItems = searchResult.on_response_received_commands
+      items = searchResult.on_response_received_commands
         .flatMap(cmd => cmd?.appendContinuationItemsAction?.continuationItems || []);
     }
 
-    // Convertimos a formato que espera tu frontend
-    const songs = allItems
+    const songs = items
       .filter(item => item?.id || item?.videoId)
       .slice(0, 20)
       .map(item => ({
         id: item.id || item.videoId,
         title: item.title?.text || item.title || "Sin título",
-        artist: Array.isArray(item.artists) 
+        artist: Array.isArray(item.artists)
           ? item.artists.map(a => a.name || a.text).filter(Boolean).join(", ")
-          : item.author?.name || "Desconocido",
+          : item.author?.name || item.channelTitle || "Desconocido",
         album: item.album?.name || item.album?.text || null,
         duration: item.duration?.text || item.lengthText || null,
-        thumbnail: item.thumbnails?.[0]?.url || 
+        thumbnail: item.thumbnails?.[0]?.url ||
                    (item.id ? `https://i.ytimg.com/vi/${item.id}/maxresdefault.jpg` : null)
       }));
 
-    // Para artists y albums usamos búsqueda general (más resultados)
-    const generalSearch = await yt.music.search(q);
-    const extraItems = generalSearch?.results || [];
+    console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones encontradas`);
 
-    const artists = extraItems
-      .filter(i => i.type === "channel" || i.subscribers)
-      .slice(0, 8)
-      .map(i => ({
-        id: i.id,
-        name: i.name || i.title?.text || i.title,
-        subscribers: i.subscribers?.text || null,
-        thumbnail: i.thumbnails?.[0]?.url || null,
-      }));
-
-    const albums = extraItems
-      .filter(i => i.type === "album" || i.playlistId)
-      .slice(0, 8)
-      .map(i => ({
-        id: i.id || i.playlistId,
-        title: i.title?.text || i.title,
-        artist: Array.isArray(i.artists) ? i.artists.map(a => a.name).join(", ") : null,
-        year: i.year || null,
-        thumbnail: i.thumbnails?.[0]?.url || null,
-      }));
-
-    const response = { songs, artists, albums };
-
-    console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones, ${artists.length} artistas, ${albums.length} álbumes`);
-
-    res.json(response);
+    res.json({
+      songs,
+      artists: [],
+      albums: []
+    });
 
   } catch (err) {
-    console.error("❌ Error en /search:", err.message);
+    console.error("❌ Error crítico en /search:", err);
     res.status(500).json({
       songs: [],
       artists: [],
