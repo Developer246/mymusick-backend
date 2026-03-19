@@ -18,19 +18,25 @@ const YTDLP_PATH = process.env.YTDLP_PATH || null;
 
 const app = express();
 
-// ==================== MIDDLEWARES ====================
+// ==================== NUEVO: Trust Proxy (IMPORTANTE) ====================
+app.set('trust proxy', 1);   // ← Agrega esta línea
+
+// Middlewares
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(compression());
+
+// Rate limit con validación desactivada (para evitar el error)
 app.use(rateLimit({
-  windowMs: 60 * 1000,   // 1 minuto
+  windowMs: 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { 
+    xForwardedForHeader: false   // ← Esto silencia el warning
+  }
 }));
 
 // ==================== GLOBALS ====================
