@@ -18,24 +18,43 @@ const YTDLP_PATH = process.env.YTDLP_PATH || null;
 
 const app = express();
 
-// ==================== NUEVO: Trust Proxy (IMPORTANTE) ====================
-app.set('trust proxy', 1);   // ← Agrega esta línea
+// ==================== TRUST PROXY ====================
+app.set('trust proxy', 1);
 
-// Middlewares
-app.use(cors());
+// ==================== CORS (PRIMERO QUE TODO) ====================
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Range"],
+  exposedHeaders: ["Content-Length", "Content-Range", "Accept-Ranges"],
+}));
+
+// Responde preflight OPTIONS en todas las rutas
+app.options("*", cors());
+
+// Header manual de respaldo (por si Railway intercepta antes)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
+  res.header("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
+// ==================== OTROS MIDDLEWARES ====================
 app.use(express.json());
 app.use(morgan("dev"));
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(compression());
 
-// Rate limit con validación desactivada (para evitar el error)
 app.use(rateLimit({
   windowMs: 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
-  validate: { 
-    xForwardedForHeader: false   // ← Esto silencia el warning
+  validate: {
+    xForwardedForHeader: false
   }
 }));
 
@@ -49,13 +68,13 @@ const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 horas
 async function initYoutubeDl() {
   if (youtubedl) return youtubedl;
 
- const binaryPaths = [
-  YTDLP_PATH,
-  "/usr/local/bin/yt-dlp",
-  "/usr/local/bin/YT-DLP",        // ← agrega esta línea
-  "/usr/bin/yt-dlp",
-  path.join(__dirname, "node_modules/.bin/yt-dlp"),
-].filter(Boolean);
+  const binaryPaths = [
+    YTDLP_PATH,
+    "/usr/local/bin/yt-dlp",
+    "/usr/local/bin/YT-DLP",
+    "/usr/bin/yt-dlp",
+    path.join(__dirname, "node_modules/.bin/yt-dlp"),
+  ].filter(Boolean);
 
   for (const binPath of binaryPaths) {
     if (binPath && fs.existsSync(binPath)) {
@@ -159,7 +178,7 @@ function fetchJson(url) {
 
 // ==================== RUTAS ====================
 
-// 🔍 BÚSQUEDA - Versión robusta para youtubei.js v16 (Marzo 2026)
+// 🔍 BÚSQUEDA
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -171,7 +190,6 @@ app.get("/search", async (req, res) => {
 
     let searchResult;
     try {
-      // Intento 1: Cliente Music (WEB_REMIX)
       searchResult = await yt.music.search(q);
     } catch (e) {
       console.warn("WEB_REMIX falló, intentando con WEB...", e.message);
@@ -180,7 +198,6 @@ app.get("/search", async (req, res) => {
       searchResult = await ytWeb.search(q);
     }
 
-    // Extracción robusta de resultados (maneja varios formatos de respuesta)
     let items = [];
     if (searchResult?.results?.length) {
       items = searchResult.results;
@@ -208,11 +225,7 @@ app.get("/search", async (req, res) => {
 
     console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones encontradas`);
 
-    res.json({
-      songs,
-      artists: [],
-      albums: []
-    });
+    res.json({ songs, artists: [], albums: [] });
 
   } catch (err) {
     console.error("❌ Error crítico en /search:", err);
@@ -225,7 +238,7 @@ app.get("/search", async (req, res) => {
   }
 });
 
-// 🎵 Streaming con soporte completo a Range Requests
+// 🎵 STREAMING con Range Requests
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
   if (!id || id.length !== 11) {
@@ -306,4 +319,3 @@ async function start() {
 }
 
 start();
-
