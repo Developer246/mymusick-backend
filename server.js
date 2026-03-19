@@ -159,50 +159,86 @@ function fetchJson(url) {
 
 // ==================== RUTAS ====================
 
-// 🔍 Búsqueda
-app.get("/search", async (req, res, next) => {
+// 🔍 BÚSQUEDA CORREGIDA PARA youtubei.js v16 + bgutil-pot (2026)
+app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q) return res.json({ songs: [], artists: [], albums: [] });
+    if (!q || q.length < 2) {
+      return res.json({ songs: [], artists: [], albums: [] });
+    }
 
     const yt = await getYT();
 
-    const [songsRes, artistsRes, albumsRes] = await Promise.all([
-      yt.music.search(q, { type: "song" }),
-      yt.music.search(q, { type: "artist" }),
-      yt.music.search(q, { type: "album" }),
-    ]);
+    // Buscamos con YouTube Music
+    const searchResult = await yt.music.search(q, { type: "song" });
 
-    const extractItems = (search) =>
-      Array.isArray(search.contents) ? search.contents.flatMap(s => s.contents || []) : [];
+    // Nueva extracción robusta (funciona mejor en v16)
+    let allItems = [];
 
-    const songs = extractItems(songsRes).slice(0, 12).map(i => ({
-      id: i.id || i.video_id,
-      title: i.title,
-      artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-      album: i.album?.name || null,
-      duration: i.duration?.text || null,
-      thumbnail: getBestThumbnail(i.id || i.video_id),
-    }));
+    if (searchResult?.results?.length) {
+      allItems = searchResult.results;
+    } else if (searchResult?.contents) {
+      allItems = searchResult.contents.flatMap(s => s.contents || []);
+    } else if (searchResult?.on_response_received_commands) {
+      allItems = searchResult.on_response_received_commands
+        .flatMap(cmd => cmd?.appendContinuationItemsAction?.continuationItems || []);
+    }
 
-    const artists = extractItems(artistsRes).slice(0, 8).map(i => ({
-      id: i.id,
-      name: i.name || i.title,
-      subscribers: i.subscribers?.text || null,
-      thumbnail: i.thumbnail?.contents?.[0]?.url || null,
-    }));
+    // Convertimos a formato que espera tu frontend
+    const songs = allItems
+      .filter(item => item?.id || item?.videoId)
+      .slice(0, 20)
+      .map(item => ({
+        id: item.id || item.videoId,
+        title: item.title?.text || item.title || "Sin título",
+        artist: Array.isArray(item.artists) 
+          ? item.artists.map(a => a.name || a.text).filter(Boolean).join(", ")
+          : item.author?.name || "Desconocido",
+        album: item.album?.name || item.album?.text || null,
+        duration: item.duration?.text || item.lengthText || null,
+        thumbnail: item.thumbnails?.[0]?.url || 
+                   (item.id ? `https://i.ytimg.com/vi/${item.id}/maxresdefault.jpg` : null)
+      }));
 
-    const albums = extractItems(albumsRes).slice(0, 8).map(i => ({
-      id: i.id,
-      title: i.title,
-      artist: i.artists?.map(a => a.name).join(", ") || "Desconocido",
-      year: i.year || null,
-      thumbnail: i.thumbnail?.contents?.[0]?.url || null,
-    }));
+    // Para artists y albums usamos búsqueda general (más resultados)
+    const generalSearch = await yt.music.search(q);
+    const extraItems = generalSearch?.results || [];
 
-    res.json({ songs, artists, albums });
+    const artists = extraItems
+      .filter(i => i.type === "channel" || i.subscribers)
+      .slice(0, 8)
+      .map(i => ({
+        id: i.id,
+        name: i.name || i.title?.text || i.title,
+        subscribers: i.subscribers?.text || null,
+        thumbnail: i.thumbnails?.[0]?.url || null,
+      }));
+
+    const albums = extraItems
+      .filter(i => i.type === "album" || i.playlistId)
+      .slice(0, 8)
+      .map(i => ({
+        id: i.id || i.playlistId,
+        title: i.title?.text || i.title,
+        artist: Array.isArray(i.artists) ? i.artists.map(a => a.name).join(", ") : null,
+        year: i.year || null,
+        thumbnail: i.thumbnails?.[0]?.url || null,
+      }));
+
+    const response = { songs, artists, albums };
+
+    console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones, ${artists.length} artistas, ${albums.length} álbumes`);
+
+    res.json(response);
+
   } catch (err) {
-    next(err);
+    console.error("❌ Error en /search:", err.message);
+    res.status(500).json({
+      songs: [],
+      artists: [],
+      albums: [],
+      error: "Error interno en la búsqueda"
+    });
   }
 });
 
