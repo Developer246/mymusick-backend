@@ -178,7 +178,6 @@ function fetchJson(url) {
 
 // ==================== RUTAS ====================
 
-// 🔍 BÚSQUEDA
 app.get("/search", async (req, res) => {
   try {
     const q = req.query.q?.trim();
@@ -190,7 +189,7 @@ app.get("/search", async (req, res) => {
 
     let searchResult;
     try {
-      searchResult = await yt.music.search(q);
+      searchResult = await yt.music.search(q, { type: "song" });
     } catch (e) {
       console.warn("WEB_REMIX falló, intentando con WEB...", e.message);
       ytClient = null;
@@ -198,43 +197,71 @@ app.get("/search", async (req, res) => {
       searchResult = await ytWeb.search(q);
     }
 
+    // LOG para ver la estructura real
+    console.log("RAW RESULT:", JSON.stringify(searchResult?.contents?.[0]?.contents?.slice(0,2), null, 2));
+
     let items = [];
-    if (searchResult?.results?.length) {
-      items = searchResult.results;
-    } else if (searchResult?.contents) {
+    if (searchResult?.contents) {
       items = searchResult.contents.flatMap(section => section?.contents || []);
-    } else if (searchResult?.on_response_received_commands) {
-      items = searchResult.on_response_received_commands
-        .flatMap(cmd => cmd?.appendContinuationItemsAction?.continuationItems || []);
+    } else if (searchResult?.results?.length) {
+      items = searchResult.results;
     }
 
     const songs = items
-      .filter(item => item?.id || item?.videoId)
+      .filter(item => {
+        const id = item?.id || item?.videoId;
+        if (!id) return false;
+        // Solo IDs válidos de YouTube (11 chars alfanuméricos)
+        return /^[a-zA-Z0-9_-]{11}$/.test(id);
+      })
       .slice(0, 20)
-      .map(item => ({
-        id: item.id || item.videoId,
-        title: item.title?.text || item.title || "Sin título",
-        artist: Array.isArray(item.artists)
-          ? item.artists.map(a => a.name || a.text).filter(Boolean).join(", ")
-          : item.author?.name || item.channelTitle || "Desconocido",
-        album: item.album?.name || item.album?.text || null,
-        duration: item.duration?.text || item.lengthText || null,
-        thumbnail: item.thumbnails?.[0]?.url ||
-                   (item.id ? `https://i.ytimg.com/vi/${item.id}/maxresdefault.jpg` : null)
-      }));
+      .map(item => {
+        const id = item.id || item.videoId;
 
-    console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones encontradas`);
+        // Extraer artistas
+        let artist = "Desconocido";
+        if (Array.isArray(item.artists) && item.artists.length) {
+          artist = item.artists.map(a => a.name || a.text).filter(Boolean).join(", ");
+        } else if (item.author?.name) {
+          artist = item.author.name;
+        } else if (Array.isArray(item.flex_columns)) {
+          // youtubei.js a veces mete artistas en flex_columns[1]
+          const col = item.flex_columns[1]?.title?.runs;
+          if (col) artist = col.map(r => r.text).filter(Boolean).join("");
+        }
 
+        // Extraer álbum
+        let album = null;
+        if (item.album?.name) {
+          album = item.album.name;
+        } else if (item.album?.text) {
+          album = item.album.text;
+        } else if (Array.isArray(item.flex_columns) && item.flex_columns[2]) {
+          const col = item.flex_columns[2]?.title?.runs;
+          if (col) album = col.map(r => r.text).filter(Boolean).join("");
+        }
+
+        // Thumbnail: priorizar maxresdefault real
+        const thumb = getBestThumbnail(id) ||
+          item.thumbnails?.[item.thumbnails.length - 1]?.url ||
+          item.thumbnail?.[0]?.url;
+
+        return {
+          id,
+          title: item.title?.text || item.title || "Sin título",
+          artist,
+          album,
+          duration: item.duration?.text || item.lengthText?.simpleText || null,
+          thumbnail: thumb,
+        };
+      });
+
+    console.log(`✅ Búsqueda "${q}" → ${songs.length} canciones`);
     res.json({ songs, artists: [], albums: [] });
 
   } catch (err) {
-    console.error("❌ Error crítico en /search:", err);
-    res.status(500).json({
-      songs: [],
-      artists: [],
-      albums: [],
-      error: "Error interno en la búsqueda"
-    });
+    console.error("❌ Error en /search:", err);
+    res.status(500).json({ songs: [], artists: [], albums: [], error: "Error interno" });
   }
 });
 
