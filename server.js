@@ -49,13 +49,13 @@ const CACHE_TTL = 5 * 60 * 60 * 1000; // 5 horas
 async function initYoutubeDl() {
   if (youtubedl) return youtubedl;
 
-  const binaryPaths = [
-    YTDLP_PATH,
-    "/usr/local/bin/yt-dlp",
-    "/usr/bin/yt-dlp",
-    path.join(__dirname, "node_modules/.bin/yt-dlp"),
-    path.join(__dirname, "node_modules/youtube-dl-exec/bin/yt-dlp"),
-  ].filter(Boolean);
+ const binaryPaths = [
+  YTDLP_PATH,
+  "/usr/local/bin/yt-dlp",
+  "/usr/local/bin/YT-DLP",        // ← agrega esta línea
+  "/usr/bin/yt-dlp",
+  path.join(__dirname, "node_modules/.bin/yt-dlp"),
+].filter(Boolean);
 
   for (const binPath of binaryPaths) {
     if (binPath && fs.existsSync(binPath)) {
