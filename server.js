@@ -95,11 +95,20 @@ async function getYT() {
 // ==================== HELPERS ====================
 
 // Miniatura de mayor resolución ordenando por área (width × height)
+// Reemplaza el parámetro de tamaño en URLs de googleusercontent/yt3 para obtener máxima calidad
+function upgradeThumbnailUrl(url) {
+  if (!url) return url;
+  // URLs tipo: =w120-h120-l90-rj → reemplazar por =w544-h544-l90-rj
+  // s0 = tamaño original sin límite (máxima resolución disponible)
+  return url.replace(/=w\d+-h\d+[-\w]*/, "=s0");
+}
+
 function getBestThumbnail(id, thumbnails) {
   if (Array.isArray(thumbnails) && thumbnails.length) {
-    return thumbnails
+    const best = thumbnails
       .filter(t => t?.url)
       .sort((a, b) => ((b.width||0)*(b.height||0)) - ((a.width||0)*(a.height||0)))[0]?.url || null;
+    return upgradeThumbnailUrl(best);
   }
   return null;
 }
