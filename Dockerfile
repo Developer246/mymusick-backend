@@ -15,13 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Instalar yt-dlp ────────────────────────────────────────────────────────
 RUN pip3 install --no-cache-dir yt-dlp --break-system-packages
 
-# ── Registrar Node.js como runtime JS para yt-dlp ─────────────────────────
-# yt-dlp necesita un runtime JS para descifrar YouTube (n-function/sig)
-RUN NODE_PATH=/usr/bin/node \
-    && mkdir -p /etc/yt-dlp \
-    && echo "[default]" > /etc/yt-dlp/config \
-    && echo "--js-runtimes nodejs:/usr/local/lib/node_modules_global" >> /etc/yt-dlp/config \
-    && echo "✅ Node.js registrado como runtime JS para yt-dlp: /usr/local/lib/node_modules_global"
 
 # ── Instalar el plugin POT para yt-dlp ────────────────────────────────────
 RUN pip3 install --no-cache-dir bgutil-ytdlp-pot-provider --break-system-packages
