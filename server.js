@@ -94,14 +94,8 @@ async function getYT() {
 
 // ==================== HELPERS ====================
 
-// Miniatura máxima resolución:
-// - Si hay un videoId → usa maxresdefault de YouTube (1280x720)
-// - Si hay array de thumbnails → toma la de mayor área
-// - Fallback: hqdefault
+// Miniatura de mayor resolución ordenando por área (width × height)
 function getBestThumbnail(id, thumbnails) {
-  if (id && /^[a-zA-Z0-9_-]{11}$/.test(id)) {
-    return `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`;
-  }
   if (Array.isArray(thumbnails) && thumbnails.length) {
     return thumbnails
       .filter(t => t?.url)
@@ -272,7 +266,7 @@ app.get("/search", async (req, res) => {
           artist:    extractArtistName(item),
           album:     extractAlbumName(item),
           duration:  item.duration?.text || item.lengthText?.simpleText || item.lengthText || null,
-          thumbnail: getBestThumbnail(id),
+          thumbnail: getBestThumbnail(id, item.thumbnails),
         };
       });
 
