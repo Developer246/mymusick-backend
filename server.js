@@ -186,6 +186,8 @@ async function getAudioUrl(id) {
     format: "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
     noPlaylist: true,
     extractorArgs: "youtubepot-bgutilhttp:base_url=" + POT_SERVER,
+    // Indicar a yt-dlp dónde está Node.js para descifrar YouTube
+    jsRuntimes: "nodejs:" + (process.env.NODE_PATH || process.execPath),
   });
 
   const audioFormat = info.formats
