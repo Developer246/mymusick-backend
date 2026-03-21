@@ -276,7 +276,7 @@ app.get("/search", async (req, res) => {
           artist:    extractArtistName(item),
           album:     extractAlbumName(item),
           duration:  item.duration?.text || item.lengthText?.simpleText || item.lengthText || null,
-          thumbnail: getBestThumbnail,
+          thumbnail: getBestThumbnail(id,item),
         };
       });
 
