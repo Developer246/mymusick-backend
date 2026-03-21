@@ -177,7 +177,10 @@ function fetchJson(url) {
 }
 
 // ==================== RUTAS ====================
-
+function getBestThumbnail(id, item) {
+  if (item?.thumbnails?.length) {
+    return item.thumbnails[item.thumbnails.length - 1].url;
+  }
 // 🔍 BÚSQUEDA
 app.get("/search", async (req, res) => {
   try {
@@ -273,7 +276,7 @@ app.get("/search", async (req, res) => {
           artist:    extractArtistName(item),
           album:     extractAlbumName(item),
           duration:  item.duration?.text || item.lengthText?.simpleText || item.lengthText || null,
-          thumbnail: thumbnail: item.thumbnails?.[0]?.url || null,
+          thumbnail: getBestThumbnail,
         };
       });
 
