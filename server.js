@@ -273,7 +273,7 @@ app.get("/search", async (req, res) => {
           artist:    extractArtistName(item),
           album:     extractAlbumName(item),
           duration:  item.duration?.text || item.lengthText?.simpleText || item.lengthText || null,
-          thumbnail: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`,
+          thumbnail: thumbnail: item.thumbnails?.[0]?.url || null,
         };
       });
 
