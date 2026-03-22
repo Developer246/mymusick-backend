@@ -331,6 +331,10 @@ app.get("/stream/:id", async (req, res) => {
   try {
     const { streamUrl, mimeType, filesize, httpHeaders } = await getAudioUrl(id);
 
+    console.log(`🎵 Stream ${id} | size: ${filesize} | mime: ${mimeType}`);
+
+    const rangeHeader = req.headers.range;
+
     const ytHeaders = {
       "User-Agent": httpHeaders["User-Agent"] ||
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -339,32 +343,37 @@ app.get("/stream/:id", async (req, res) => {
       "Accept-Encoding": "identity",
       "Origin": "https://www.youtube.com",
       "Referer": "https://www.youtube.com/",
+      // Siempre enviar Range — sin esto YouTube no devuelve Content-Length
+      "Range": rangeHeader || "bytes=0-",
     };
-
-    const rangeHeader = req.headers.range;
-    if (rangeHeader) {
-      ytHeaders["Range"] = rangeHeader;
-    } else if (filesize) {
-      ytHeaders["Range"] = "bytes=0-";
-    }
 
     const protocol = streamUrl.startsWith("https") ? https : http;
 
     const ytReq = protocol.get(streamUrl, { headers: ytHeaders }, (ytRes) => {
-      const status = ytRes.statusCode === 206 ? 206 : 200;
+      console.log(`📡 YouTube respondió ${ytRes.statusCode} | content-length: ${ytRes.headers["content-length"]} | content-range: ${ytRes.headers["content-range"]}`);
+
+      const status = rangeHeader ? 206 : 200;
 
       const headers = {
         "Content-Type": mimeType,
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=3600",
+        "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",
         "Cross-Origin-Resource-Policy": "cross-origin",
       };
 
-      if (ytRes.headers["content-length"]) headers["Content-Length"] = ytRes.headers["content-length"];
-      if (ytRes.headers["content-range"])  headers["Content-Range"]  = ytRes.headers["content-range"];
-      else if (filesize && rangeHeader) {
-        const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      // Content-Length: necesario para que el player calcule duración
+      if (ytRes.headers["content-length"]) {
+        headers["Content-Length"] = ytRes.headers["content-length"];
+      } else if (filesize) {
+        headers["Content-Length"] = filesize;
+      }
+
+      // Content-Range: necesario para seek
+      if (ytRes.headers["content-range"]) {
+        headers["Content-Range"] = ytRes.headers["content-range"];
+      } else if (filesize) {
+        const match = (rangeHeader || "bytes=0-").match(/bytes=(\d+)-(\d*)/);
         if (match) {
           const start = parseInt(match[1]);
           const end   = match[2] ? parseInt(match[2]) : filesize - 1;
@@ -384,7 +393,6 @@ app.get("/stream/:id", async (req, res) => {
     });
 
     req.on("close", () => ytReq.destroy());
-    console.log(`✅ Stream ${rangeHeader ? "(range)" : "(full)"} para ${id}`);
 
   } catch (err) {
     console.error("Error en /stream:", err.message);
