@@ -8,7 +8,7 @@ echo "🟢 Node.js encontrado en: ${NODE_BIN}"
 
 # Crear config global de yt-dlp con el runtime de Node
 mkdir -p /root/.config/yt-dlp
-echo "--js-runtimes nodejs:${NODE_BIN}" > /root/.config/yt-dlp/config
+echo "--js-runtimes node:${NODE_BIN}" > /root/.config/yt-dlp/config
 echo "✅ yt-dlp configurado con runtime: nodejs:${NODE_BIN}"
 
 # ── Arrancar bgutil-pot si está disponible ─────────────────────────────────
