@@ -321,6 +321,22 @@ app.get("/search", async (req, res) => {
   }
 });
 
+// 🎵 HEAD request — devuelve metadatos sin body (para que el player conozca el tamaño)
+app.head("/stream/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id || id.length !== 11) return res.status(400).end();
+  try {
+    const { mimeType, filesize } = await getAudioUrl(id);
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    if (filesize) res.setHeader("Content-Length", filesize);
+    res.status(200).end();
+  } catch (err) {
+    res.status(500).end();
+  }
+});
+
 // 🎵 STREAMING con Range Requests
 app.get("/stream/:id", async (req, res) => {
   const { id } = req.params;
