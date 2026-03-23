@@ -368,52 +368,75 @@ app.get("/stream/:id", async (req, res) => {
       "Range": rangeHeader || "bytes=0-",
     };
 
-    const protocol = streamUrl.startsWith("https") ? https : http;
-
-    const ytReq = protocol.get(streamUrl, { headers: ytHeaders }, (ytRes) => {
-      console.log(`📡 YouTube respondió ${ytRes.statusCode} | content-length: ${ytRes.headers["content-length"]} | content-range: ${ytRes.headers["content-range"]}`);
-
-      const status = rangeHeader ? 206 : 200;
-
-      const headers = {
-        "Content-Type": mimeType,
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-cache",
-        "Access-Control-Allow-Origin": "*",
-        "Cross-Origin-Resource-Policy": "cross-origin",
-      };
-
-      // Content-Length: necesario para que el player calcule duración
-      if (ytRes.headers["content-length"]) {
-        headers["Content-Length"] = ytRes.headers["content-length"];
-      } else if (filesize) {
-        headers["Content-Length"] = filesize;
+    // Función para hacer la petición HTTP siguiendo redirects (302)
+    function fetchAudio(url, headers, redirects = 0) {
+      if (redirects > 5) {
+        if (!res.headersSent) res.status(502).json({ error: "Demasiados redirects" });
+        return;
       }
 
-      // Content-Range: necesario para seek
-      if (ytRes.headers["content-range"]) {
-        headers["Content-Range"] = ytRes.headers["content-range"];
-      } else if (filesize) {
-        const match = (rangeHeader || "bytes=0-").match(/bytes=(\d+)-(\d*)/);
-        if (match) {
-          const start = parseInt(match[1]);
-          const end   = match[2] ? parseInt(match[2]) : filesize - 1;
-          headers["Content-Range"] = `bytes ${start}-${end}/${filesize}`;
+      const protocol = url.startsWith("https") ? https : http;
+
+      const ytReq = protocol.get(url, { headers }, (ytRes) => {
+        console.log(`📡 YouTube respondió ${ytRes.statusCode} | content-length: ${ytRes.headers["content-length"]} | content-range: ${ytRes.headers["content-range"]}`);
+
+        // Seguir redirect automáticamente
+        if (ytRes.statusCode === 301 || ytRes.statusCode === 302 || ytRes.statusCode === 307 || ytRes.statusCode === 308) {
+          const redirectUrl = ytRes.headers["location"];
+          if (!redirectUrl) {
+            if (!res.headersSent) res.status(502).json({ error: "Redirect sin Location" });
+            return;
+          }
+          console.log(`🔀 Redirect ${ytRes.statusCode} → ${redirectUrl.substring(0, 80)}...`);
+          // Limpiar cache — la URL expiró
+          urlCache.delete(id);
+          ytRes.resume(); // consumir body vacío
+          fetchAudio(redirectUrl, headers, redirects + 1);
+          return;
         }
-      }
 
-      res.writeHead(status, headers);
-      ytRes.pipe(res);
-      ytRes.on("error", e => console.error(`❌ Pipe error ${id}:`, e.message));
-    });
+        const status = rangeHeader ? 206 : 200;
 
-    ytReq.on("error", (err) => {
-      console.error("Stream error:", err.message);
-      urlCache.delete(id);
-      if (!res.headersSent) res.status(502).json({ error: "Error al conectar con YouTube" });
-    });
+        const resHeaders = {
+          "Content-Type": mimeType,
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-cache",
+          "Access-Control-Allow-Origin": "*",
+          "Cross-Origin-Resource-Policy": "cross-origin",
+        };
 
-    req.on("close", () => ytReq.destroy());
+        if (ytRes.headers["content-length"]) {
+          resHeaders["Content-Length"] = ytRes.headers["content-length"];
+        } else if (filesize) {
+          resHeaders["Content-Length"] = filesize;
+        }
+
+        if (ytRes.headers["content-range"]) {
+          resHeaders["Content-Range"] = ytRes.headers["content-range"];
+        } else if (filesize) {
+          const match = (rangeHeader || "bytes=0-").match(/bytes=(\d+)-(\d*)/);
+          if (match) {
+            const start = parseInt(match[1]);
+            const end   = match[2] ? parseInt(match[2]) : filesize - 1;
+            resHeaders["Content-Range"] = `bytes ${start}-${end}/${filesize}`;
+          }
+        }
+
+        res.writeHead(status, resHeaders);
+        ytRes.pipe(res);
+        ytRes.on("error", e => console.error(`❌ Pipe error ${id}:`, e.message));
+      });
+
+      ytReq.on("error", (err) => {
+        console.error("Stream error:", err.message);
+        urlCache.delete(id);
+        if (!res.headersSent) res.status(502).json({ error: "Error al conectar con YouTube" });
+      });
+
+      req.on("close", () => ytReq.destroy());
+    }
+
+    fetchAudio(streamUrl, ytHeaders);
 
   } catch (err) {
     console.error("Error en /stream:", err.message);
