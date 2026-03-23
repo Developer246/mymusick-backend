@@ -278,6 +278,11 @@ app.get("/search", async (req, res) => {
           album:     extractAlbumName(item),
           duration:  item.duration?.text || item.lengthText?.simpleText || item.lengthText || null,
           thumbnail: getBestThumbnail(id, item.thumbnails),
+          explicit:  !!(item.badges?.some(b =>
+            b?.label?.toLowerCase().includes("explicit") ||
+            b?.text?.toLowerCase().includes("explicit") ||
+            b?.icon?.iconType === "MUSIC_EXPLICIT_BADGE"
+          )),
         };
       });
 
