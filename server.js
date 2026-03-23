@@ -172,23 +172,35 @@ function flattenItems(result) {
 }
 
 // ==================== OBTENER URL DE AUDIO ====================
-async function getAudioUrl(id) {
+async function getAudioUrl(id, retries = 2) {
   const cached = getCache(id);
   if (cached) return cached;
 
   await initYoutubeDl();
 
   const url = `https://www.youtube.com/watch?v=${id}`;
-  const info = await youtubedl(url, {
-    dumpSingleJson: true,
-    noCheckCertificates: true,
-    preferFreeFormats: true,
-    format: "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
-    noPlaylist: true,
-    extractorArgs: "youtubepot-bgutilhttp:base_url=" + POT_SERVER,
-    // Indicar a yt-dlp dónde está Node.js para descifrar YouTube
-    jsRuntimes: "node:" + (process.env.NODE_PATH || process.execPath),
-  });
+
+  let info;
+  try {
+    info = await youtubedl(url, {
+      dumpSingleJson: true,
+      noCheckCertificates: true,
+      preferFreeFormats: true,
+      format: "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+      noPlaylist: true,
+      extractorArgs: "youtubepot-bgutilhttp:base_url=" + POT_SERVER,
+      jsRuntimes: "node:" + (process.env.NODE_PATH || process.execPath),
+      retries: 3,
+      fragmentRetries: 3,
+    });
+  } catch (err) {
+    if (retries > 0 && err.message.includes("429")) {
+      console.warn(`⚠️ 429 para ${id}, reintentando en 3s... (${retries} intentos restantes)`);
+      await new Promise(r => setTimeout(r, 3000));
+      return getAudioUrl(id, retries - 1);
+    }
+    throw err;
+  }
 
   const audioFormat = info.formats
     ?.filter(f => f.acodec !== "none" && f.vcodec === "none" && f.url)
